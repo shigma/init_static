@@ -1,3 +1,4 @@
+#[doc = include_str!("../README.md")]
 use std::error::Error;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
@@ -21,15 +22,16 @@ pub use init_static_macro::init_static;
 ///     static VALUE: u32 = "42".parse()?;
 /// }
 ///
-/// fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-///     init_static()?;
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn Error>> {
+///     init_static().await?;
 ///     println!("{}", *VALUE);
 ///     Ok(())
 /// }
 /// ```
-pub fn init_static() -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn init_static() -> Result<(), Box<dyn Error>> {
     for init_fn in __private::INIT_FUNCTIONS {
-        init_fn()?;
+        init_fn().await?;
     }
     Ok(())
 }
@@ -94,10 +96,12 @@ impl<T: Debug> Debug for InitStatic<T> {
 
 #[doc(hidden)]
 pub mod __private {
+    use std::pin::Pin;
+
     pub use linkme;
 
     use super::*;
 
     #[linkme::distributed_slice]
-    pub static INIT_FUNCTIONS: [fn() -> Result<(), Box<dyn Error + Send + Sync>>];
+    pub static INIT_FUNCTIONS: [fn() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>];
 }

@@ -2,6 +2,7 @@
 use init_static_macro::init_static;
 #[rustfmt::skip]
 init_static! {
-    static FOO: u32 = 42;
-    static BAR: u32 = "42".parse()?;
+    static V1: u32 = 42;
+    static V2: u32 = "42".parse()?;
+    static V3: u32 = async { 42 }.await;
 }

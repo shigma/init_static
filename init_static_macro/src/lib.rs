@@ -24,8 +24,9 @@ use syn::parse::{Parse, ParseStream, Parser};
 ///     static VALUE: u32 = "42".parse()?;
 /// }
 ///
-/// fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-///     init_static()?;
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn Error>> {
+///     init_static().await?;
 ///     println!("{}", *VALUE);
 ///     Ok(())
 /// }
@@ -70,9 +71,11 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
 
                 #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
                 #[linkme(crate = ::init_static::__private::linkme)]
-                fn #init_fn_name() -> Result<(), Box<dyn ::std::error::Error + ::std::marker::Send + ::std::marker::Sync>> {
-                    ::init_static::InitStatic::init(&#ident, #expr);
-                    Ok(())
+                fn #init_fn_name() -> std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>> {
+                    Box::pin(async {
+                        ::init_static::InitStatic::init(&#ident, #expr);
+                        Ok(())
+                    })
                 }
             }
         })

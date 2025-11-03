@@ -18,10 +18,9 @@ Unlike `lazy_static`, `init_static` uses [`std::sync::OnceLock`](https://doc.rus
 | Feature            | `lazy_static`           | `init_static`                     |
 | ------------------ | ----------------------- | --------------------------------- |
 | Initialization     | Implicit (on first use) | Explicit (`init_static()` call)   |
-| `Result` Support   | Not supported           | Supported                         |
+| `Result` support   | Not supported           | Supported                         |
+| Async support      | Not supported           | Supported                         |
 | Early failure      | No (fail at runtime)    | Yes (optional, before app starts) |
-
-<!-- | Async support      | Not supported                     | Possible (run async init in main)     | -->
 
 ## Installation
 
@@ -42,8 +41,9 @@ init_static! {
     static VALUE: u32 = "42".parse()?;
 }
 
-fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    init_static()?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    init_static().await?;
     println!("{}", *VALUE);
     Ok(())
 }
