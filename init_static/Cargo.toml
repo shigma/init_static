@@ -1,6 +1,6 @@
 [package]
 name = "init_static"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 authors = [
@@ -11,7 +11,7 @@ repository = "https://github.com/shigma/init_static"
 documentation = "https://docs.rs/init_static"
 
 [dependencies]
-init_static_macro = { version = "0.1.0", path = "../init_static_macro" }
+init_static_macro = { version = "0.1.1", path = "../init_static_macro" }
 linkme = "0.3.35"
 
 [dev-dependencies]
