@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "init_static",
+    "init_static_macro",
+]
+resolver = "3"
