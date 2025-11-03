@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use init_static_macro::init_static;
 #[rustfmt::skip]
-pub static FOO: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static FOO: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
 #[rustfmt::skip]
 #[::init_static::__private::linkme::distributed_slice(
     ::init_static::__private::INIT_FUNCTIONS
@@ -15,7 +15,7 @@ fn __init_foo() -> Result<
     Ok(())
 }
 #[rustfmt::skip]
-pub static BAR: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static BAR: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
 #[rustfmt::skip]
 #[::init_static::__private::linkme::distributed_slice(
     ::init_static::__private::INIT_FUNCTIONS

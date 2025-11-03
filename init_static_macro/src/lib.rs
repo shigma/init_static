@@ -3,6 +3,33 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 
+/// Macro to declare statically stored values with explicit initialization. Similar to
+/// [`lazy_static!`](lazy_static::lazy_static), but initialization is not automatic.
+///
+/// Each static declared using this macro:
+///
+/// - Wraps the value type in [`InitStatic`](init_static::InitStatic)
+/// - Generates an init function that sets the value
+/// - Registers the init function in a distributed slice
+///
+/// The values are initialized when [`init_static`](init_static::init_static) is called.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+/// use std::error::Error;
+///
+/// init_static! {
+///     static VALUE: u32 = "42".parse()?;
+/// }
+///
+/// fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+///     init_static()?;
+///     println!("{}", *VALUE);
+///     Ok(())
+/// }
+/// ```
 #[proc_macro]
 pub fn init_static(input: TokenStream) -> TokenStream {
     init_static_inner(input.into()).into()
@@ -28,7 +55,9 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
     items
         .into_iter()
         .map(|item| {
+            let vis = &item.vis;
             let ident = &item.ident;
+            let mutability = &item.mutability;
             let ty = &item.ty;
             let expr = &item.expr;
             let init_fn_name = syn::Ident::new(
@@ -37,7 +66,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             );
 
             quote! {
-                pub static #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
+                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
 
                 #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
                 #[linkme(crate = ::init_static::__private::linkme)]
