@@ -2,6 +2,13 @@
 name = "init_static_macro"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+authors = [
+    "Shigma <shigma10826@gmail.com>",
+]
+description = "Procedure macros for init_static"
+repository = "https://github.com/shigma/init_static"
+documentation = "https://docs.rs/init_static_macro"
 
 [lib]
 proc-macro = true
