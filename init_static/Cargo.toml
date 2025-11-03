@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+init_static_macro = { version = "0.1.0", path = "../init_static_macro" }
 linkme = "0.3.35"

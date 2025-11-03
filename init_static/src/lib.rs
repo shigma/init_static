@@ -3,6 +3,8 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 
+pub use init_static_macro::init_static;
+
 pub fn init_static() -> Result<(), Box<dyn Error + Send + Sync>> {
     for init_fn in __private::INIT_FUNCTIONS {
         init_fn()?;
