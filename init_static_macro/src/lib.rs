@@ -62,13 +62,14 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             let ty = &item.ty;
             let expr = &item.expr;
             let init_fn_name = syn::Ident::new(
-                &format!("__init_{}", ident.to_string().to_ascii_lowercase()),
+                &format!("init_static_{}", ident),
                 ident.span(),
             );
 
             quote! {
                 #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
 
+                #[allow(non_snake_case)]
                 #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
                 #[linkme(crate = ::init_static::__private::linkme)]
                 fn #init_fn_name() -> std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>> {

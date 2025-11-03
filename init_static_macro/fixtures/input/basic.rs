@@ -5,4 +5,5 @@ init_static! {
     static V1: u32 = 42;
     static V2: u32 = "42".parse()?;
     static V3: u32 = async { 42 }.await;
+    static V4: u32 = async { "42".parse() }.await?;
 }
