@@ -1,16 +1,26 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::parse::Parser;
-use syn::punctuated::Punctuated;
+use syn::parse::{Parse, ParseStream, Parser};
 
 #[proc_macro]
 pub fn init_static(input: TokenStream) -> TokenStream {
     init_static_inner(input.into()).into()
 }
 
-fn init_static_inner(input: TokenStream2) -> TokenStream2 {
-    let items = match Punctuated::<syn::ItemStatic, syn::Token![;]>::parse_terminated.parse2(input) {
+fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
+    let parser = |input: ParseStream| {
+        let mut items = vec![];
+        while !input.is_empty() {
+            items.push(input.parse::<T>()?);
+        }
+        Ok(items)
+    };
+    parser.parse2(tokens)
+}
+
+pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
+    let items = match parse_repeated::<syn::ItemStatic>(input) {
         Ok(items) => items,
         Err(err) => return err.to_compile_error(),
     };
@@ -38,4 +48,69 @@ fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod test {
+    use std::env::var;
+    use std::fs::{create_dir_all, read_to_string, write};
+    use std::path::{Path, PathBuf};
+
+    use macro_expand::Context;
+    use pretty_assertions::StrComparison;
+    use prettyplease::unparse;
+    use walkdir::WalkDir;
+
+    use super::*;
+
+    struct TestDiff {
+        path: PathBuf,
+        expect: String,
+        actual: String,
+    }
+
+    #[test]
+    fn fixtures() {
+        let input_dir = "fixtures/input";
+        let output_dir = "fixtures/output";
+        let mut diffs = vec![];
+        let will_emit = var("EMIT").is_ok_and(|v| !v.is_empty());
+        for entry in WalkDir::new(input_dir).into_iter().filter_map(Result::ok) {
+            let input_path = entry.path();
+            if !input_path.is_file() || input_path.extension() != Some("rs".as_ref()) {
+                continue;
+            }
+            let path = input_path.strip_prefix(input_dir).unwrap();
+            let output_path = Path::new(output_dir).join(path);
+            let input = read_to_string(input_path).unwrap().parse().unwrap();
+            let mut ctx = Context::new();
+            ctx.register_proc_macro("init_static".into(), init_static_inner);
+            let actual = unparse(&syn::parse2(ctx.transform(input)).unwrap());
+            let expect_result = read_to_string(&output_path);
+            if let Ok(expect) = &expect_result
+                && expect == &actual
+            {
+                continue;
+            }
+            if will_emit {
+                create_dir_all(output_path.parent().unwrap()).unwrap();
+                write(output_path, &actual).unwrap();
+            }
+            if let Ok(expect) = expect_result {
+                diffs.push(TestDiff {
+                    path: path.to_path_buf(),
+                    expect,
+                    actual,
+                });
+            }
+        }
+        let len = diffs.len();
+        for diff in diffs {
+            eprintln!("diff {}", diff.path.display());
+            eprintln!("{}", StrComparison::new(&diff.expect, &diff.actual));
+        }
+        if len > 0 && !will_emit {
+            panic!("Some tests failed");
+        }
+    }
 }
