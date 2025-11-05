@@ -65,23 +65,31 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             let ty = &item.ty;
             let expr = &item.expr;
             let init_fn_name = syn::Ident::new(
-                &format!("init_static_{}", ident),
+                &format!("INIT_STATIC_{}", ident),
                 ident.span(),
             );
-            let names = Scope::collect_free_idents(expr).into_iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
+            let name = ident.to_string();
+            let deps = Scope::collect_free_idents(expr).into_iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
 
             quote! {
-                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new(&[#names]);
+                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
 
                 #[allow(non_snake_case)]
-                #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
+                #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
                 #[linkme(crate = ::init_static::__private::linkme)]
-                fn #init_fn_name() -> std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>> {
-                    Box::pin(async {
-                        ::init_static::InitStatic::init(&#ident, #expr);
-                        Ok(())
-                    })
-                }
+                static #init_fn_name: ::init_static::__private::Init = {
+                    fn #init_fn_name() -> std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>> {
+                        Box::pin(async {
+                            ::init_static::InitStatic::init(&#ident, #expr);
+                            Ok(())
+                        })
+                    }
+                    ::init_static::__private::Init {
+                        name: #name,
+                        init: #init_fn_name,
+                        deps: &[#deps],
+                    }
+                };
             }
         })
         .collect()

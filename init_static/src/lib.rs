@@ -1,9 +1,11 @@
 #[doc = include_str!("../README.md")]
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 
+use futures_util::future::try_join_all;
 pub use init_static_macro::init_static;
 
 /// Runs initialization for all statics declared with [`init_static!`].
@@ -29,11 +31,99 @@ pub use init_static_macro::init_static;
 ///     Ok(())
 /// }
 /// ```
-pub async fn init_static() -> Result<(), Box<dyn Error>> {
-    for init_fn in __private::INIT_FUNCTIONS {
-        init_fn().await?;
+pub async fn init_static() -> Result<(), InitError> {
+    let mut name_map: HashMap<&'static str, Vec<usize>> = HashMap::new();
+    for (i, init) in __private::INIT.iter().enumerate() {
+        name_map.entry(init.name).or_default().push(i);
+    }
+    let mut adjacent = __private::INIT
+        .iter()
+        .enumerate()
+        .map(|(i, init)| {
+            let deps = init
+                .deps
+                .iter()
+                .filter_map(|name| {
+                    let indices = name_map.get(name)?;
+                    if indices.len() > 1 {
+                        Some(Err(InitError::AmbiguousDependency {
+                            dependent: init.name,
+                            dependency: name,
+                        }))
+                    } else {
+                        Some(Ok(indices[0]))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>();
+            match deps {
+                Ok(deps) => Ok((i, deps)),
+                Err(e) => Err(e),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut layers = vec![];
+    while !adjacent.is_empty() {
+        let layer = adjacent
+            .extract_if(.., |(_, deps)| deps.is_empty())
+            .map(|(i, _)| i)
+            .collect::<HashSet<_>>();
+        if layer.is_empty() {
+            return Err(InitError::CircularDependency {
+                names: adjacent
+                    .iter()
+                    .map(|(i, _)| __private::INIT[*i].name)
+                    .collect::<Vec<_>>(),
+            });
+        }
+        for (_, deps) in &mut adjacent {
+            deps.retain(|dep| !layer.contains(dep));
+        }
+        layers.push(layer);
+    }
+    for layer in layers {
+        try_join_all(layer.into_iter().map(|i| (__private::INIT[i].init)()))
+            .await
+            .map_err(InitError::RuntimeError)?;
     }
     Ok(())
+}
+
+#[derive(Debug)]
+pub enum InitError {
+    AmbiguousDependency {
+        dependent: &'static str,
+        dependency: &'static str,
+    },
+    CircularDependency {
+        names: Vec<&'static str>,
+    },
+    RuntimeError(Box<dyn Error>),
+}
+
+impl Display for InitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InitError::AmbiguousDependency { dependent, dependency } => {
+                write!(
+                    f,
+                    "Cannot determine dependency '{dependent}' for '{dependency}': multiple candidates found.",
+                )
+            }
+            InitError::CircularDependency { names } => {
+                write!(f, "Circular dependency detected among: {:?}", names)
+            }
+            InitError::RuntimeError(e) => Display::fmt(e, f),
+        }
+    }
+}
+
+impl Error for InitError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            InitError::RuntimeError(e) => Some(&**e),
+            _ => None,
+        }
+    }
 }
 
 /// A wrapper around [`OnceLock`] providing safe initialization and [`Deref`] support to mimic the
@@ -43,7 +133,12 @@ pub async fn init_static() -> Result<(), Box<dyn Error>> {
 /// [`init_static`]. Accessing an uninitialized value will panic.
 pub struct InitStatic<T> {
     inner: OnceLock<T>,
-    deps: &'static [&'static str],
+}
+
+impl<T> Default for InitStatic<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> InitStatic<T> {
@@ -51,11 +146,8 @@ impl<T> InitStatic<T> {
     ///
     /// The value must be initialized using [`InitStatic::init`] or via the initialization registry
     /// before access.
-    pub const fn new(deps: &'static [&'static str]) -> Self {
-        Self {
-            inner: OnceLock::new(),
-            deps,
-        }
+    pub const fn new() -> Self {
+        Self { inner: OnceLock::new() }
     }
 
     /// Initializes the given static value.
@@ -88,7 +180,7 @@ impl<T> DerefMut for InitStatic<T> {
 
 impl<T: Debug> Debug for InitStatic<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.fmt(f)
+        Debug::fmt(&self.inner, f)
     }
 }
 
@@ -100,6 +192,13 @@ pub mod __private {
 
     use super::*;
 
+    pub struct Init {
+        pub name: &'static str,
+        #[expect(clippy::type_complexity)]
+        pub init: fn() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>,
+        pub deps: &'static [&'static str],
+    }
+
     #[linkme::distributed_slice]
-    pub static INIT_FUNCTIONS: [fn() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>];
+    pub static INIT: [Init];
 }
