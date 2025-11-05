@@ -68,14 +68,10 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 &format!("init_static_{}", ident),
                 ident.span(),
             );
-            let mut scope = Scope {
-                free_vars: HashSet::new(),
-            };
-            scope.visit_expr(expr);
-            let free_vars = scope.free_vars.into_iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
+            let names = Scope::collect_free_idents(expr).into_iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
 
             quote! {
-                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new(&[#free_vars]);
+                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new(&[#names]);
 
                 #[allow(non_snake_case)]
                 #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
@@ -91,18 +87,99 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         .collect()
 }
 
-struct Scope {
-    free_vars: HashSet<String>,
+struct Scope<'i, 'ast> {
+    free: &'i mut HashSet<String>,
+    locals: HashSet<&'ast syn::Ident>,
 }
 
-impl<'ast> Visit<'ast> for Scope {
+impl<'i, 'ast> Scope<'i, 'ast> {
+    fn collect_free_idents(expr: &'ast syn::Expr) -> HashSet<String> {
+        let mut free = HashSet::new();
+        let mut scope = Scope {
+            free: &mut free,
+            locals: HashSet::new(),
+        };
+        scope.visit_expr(expr);
+        free
+    }
+}
+
+impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
     fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
         if expr_path.qself.is_none()
+            && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident))
             && let Some(segment) = expr_path.path.segments.last()
         {
-            self.free_vars.insert(segment.ident.to_string());
+            self.free.insert(segment.ident.to_string());
         }
         syn::visit::visit_expr_path(self, expr_path);
+    }
+
+    fn visit_pat_ident(&mut self, pat_ident: &'ast syn::PatIdent) {
+        self.locals.insert(&pat_ident.ident);
+        syn::visit::visit_pat_ident(self, pat_ident);
+    }
+
+    fn visit_block(&mut self, block: &'ast syn::Block) {
+        let mut locals = HashSet::new();
+        for stmt in &block.stmts {
+            if let syn::Stmt::Item(item) = stmt {
+                match item {
+                    syn::Item::Const(item_const) => {
+                        locals.insert(&item_const.ident);
+                    }
+                    syn::Item::Static(item_static) => {
+                        locals.insert(&item_static.ident);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut scope = Scope {
+            free: self.free,
+            locals: locals.union(&self.locals).cloned().collect(),
+        };
+        for stmt in &block.stmts {
+            match stmt {
+                syn::Stmt::Local(local) => {
+                    for attrs in &local.attrs {
+                        scope.visit_attribute(attrs);
+                    }
+                    if let Some(init) = &local.init {
+                        scope.visit_local_init(init);
+                    }
+                    scope.visit_pat(&local.pat);
+                    // syn::visit::visit_local(self, local);
+                }
+                syn::Stmt::Expr(expr, _) => {
+                    scope.visit_expr(expr);
+                }
+                syn::Stmt::Item(_item) => {
+                    // skip
+                }
+                syn::Stmt::Macro(_macro) => {
+                    // skip
+                }
+            }
+            scope.visit_stmt(stmt);
+        }
+        // syn::visit::visit_block(self, block);
+    }
+
+    fn visit_expr_closure(&mut self, expr_closure: &'ast syn::ExprClosure) {
+        for attrs in &expr_closure.attrs {
+            self.visit_attribute(attrs);
+        }
+        let mut scope = Scope {
+            free: self.free,
+            locals: self.locals.clone(),
+        };
+        for pat in &expr_closure.inputs {
+            scope.visit_pat(pat);
+        }
+        scope.visit_return_type(&expr_closure.output);
+        scope.visit_expr(&expr_closure.body);
+        // syn::visit::visit_expr_closure(self, expr_closure);
     }
 }
 

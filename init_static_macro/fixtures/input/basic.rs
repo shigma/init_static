@@ -9,5 +9,8 @@ init_static! {
 }
 #[rustfmt::skip]
 init_static! {
-    static V5: u32 = *V1;
+    static V5: u32 = {
+        const N: u32 = 42;
+        *V1 + N
+    };
 }
