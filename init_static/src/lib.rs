@@ -43,12 +43,7 @@ pub async fn init_static() -> Result<(), Box<dyn Error>> {
 /// [`init_static`]. Accessing an uninitialized value will panic.
 pub struct InitStatic<T> {
     inner: OnceLock<T>,
-}
-
-impl<T> Default for InitStatic<T> {
-    fn default() -> Self {
-        Self::new()
-    }
+    deps: &'static [&'static str],
 }
 
 impl<T> InitStatic<T> {
@@ -56,8 +51,11 @@ impl<T> InitStatic<T> {
     ///
     /// The value must be initialized using [`InitStatic::init`] or via the initialization registry
     /// before access.
-    pub const fn new() -> Self {
-        Self { inner: OnceLock::new() }
+    pub const fn new(deps: &'static [&'static str]) -> Self {
+        Self {
+            inner: OnceLock::new(),
+            deps,
+        }
     }
 
     /// Initializes the given static value.

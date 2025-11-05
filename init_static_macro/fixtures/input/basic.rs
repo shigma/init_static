@@ -7,3 +7,7 @@ init_static! {
     static V3: u32 = async { 42 }.await;
     static V4: u32 = async { "42".parse() }.await?;
 }
+#[rustfmt::skip]
+init_static! {
+    static V5: u32 = *V1;
+}

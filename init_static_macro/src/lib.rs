@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
+use syn::visit::Visit;
 
 /// Macro to declare statically stored values with explicit initialization. Similar to
 /// [`lazy_static!`](lazy_static::lazy_static), but initialization is not automatic.
@@ -65,9 +68,14 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 &format!("init_static_{}", ident),
                 ident.span(),
             );
+            let mut scope = Scope {
+                free_vars: HashSet::new(),
+            };
+            scope.visit_expr(expr);
+            let free_vars = scope.free_vars.into_iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
 
             quote! {
-                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
+                #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new(&[#free_vars]);
 
                 #[allow(non_snake_case)]
                 #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT_FUNCTIONS)]
@@ -81,6 +89,21 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             }
         })
         .collect()
+}
+
+struct Scope {
+    free_vars: HashSet<String>,
+}
+
+impl<'ast> Visit<'ast> for Scope {
+    fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
+        if expr_path.qself.is_none()
+            && let Some(segment) = expr_path.path.segments.last()
+        {
+            self.free_vars.insert(segment.ident.to_string());
+        }
+        syn::visit::visit_expr_path(self, expr_path);
+    }
 }
 
 #[cfg(test)]
