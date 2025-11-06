@@ -5,7 +5,8 @@ use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 
-use futures_util::future::try_join_all;
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 pub use init_static_macro::init_static;
 
 /// Runs initialization for all statics declared with [`init_static!`].
@@ -34,7 +35,9 @@ pub use init_static_macro::init_static;
 pub async fn init_static() -> Result<(), InitError> {
     let mut name_map: HashMap<&'static str, Vec<usize>> = HashMap::new();
     for (i, init) in __private::INIT.iter().enumerate() {
-        name_map.entry(init.name).or_default().push(i);
+        for name in init.names {
+            name_map.entry(name).or_default().push(i);
+        }
     }
     let mut adjacent = __private::INIT
         .iter()
@@ -47,7 +50,7 @@ pub async fn init_static() -> Result<(), InitError> {
                     let indices = name_map.get(name)?;
                     if indices.len() > 1 {
                         Some(Err(InitError::AmbiguousDependency {
-                            dependent: init.name,
+                            dependents: init.names,
                             dependency: name,
                         }))
                     } else {
@@ -61,29 +64,25 @@ pub async fn init_static() -> Result<(), InitError> {
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut layers = vec![];
-    while !adjacent.is_empty() {
+    let mut join_set = FuturesUnordered::new();
+    while !adjacent.is_empty() || !join_set.is_empty() {
         let layer = adjacent
             .extract_if(.., |(_, deps)| deps.is_empty())
             .map(|(i, _)| i)
             .collect::<HashSet<_>>();
-        if layer.is_empty() {
-            return Err(InitError::CircularDependency {
-                names: adjacent
-                    .iter()
-                    .map(|(i, _)| __private::INIT[*i].name)
-                    .collect::<Vec<_>>(),
-            });
-        }
         for (_, deps) in &mut adjacent {
             deps.retain(|dep| !layer.contains(dep));
         }
-        layers.push(layer);
-    }
-    for layer in layers {
-        try_join_all(layer.into_iter().map(|i| (__private::INIT[i].init)()))
-            .await
-            .map_err(InitError::RuntimeError)?;
+        join_set.extend(layer.into_iter().map(|i| (__private::INIT[i].init)()));
+        if join_set.is_empty() {
+            return Err(InitError::CircularDependency {
+                names: adjacent
+                    .iter()
+                    .flat_map(|(i, _)| __private::INIT[*i].names.iter().cloned())
+                    .collect(),
+            });
+        }
+        join_set.next().await.unwrap().map_err(InitError::RuntimeError)?;
     }
     Ok(())
 }
@@ -91,7 +90,7 @@ pub async fn init_static() -> Result<(), InitError> {
 #[derive(Debug)]
 pub enum InitError {
     AmbiguousDependency {
-        dependent: &'static str,
+        dependents: &'static [&'static str],
         dependency: &'static str,
     },
     CircularDependency {
@@ -103,10 +102,10 @@ pub enum InitError {
 impl Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InitError::AmbiguousDependency { dependent, dependency } => {
+            InitError::AmbiguousDependency { dependents, dependency } => {
                 write!(
                     f,
-                    "Cannot determine dependency '{dependent}' for '{dependency}': multiple candidates found.",
+                    "Cannot determine dependency {dependency} for {dependents:?}: multiple candidates found.",
                 )
             }
             InitError::CircularDependency { names } => {
@@ -193,9 +192,9 @@ pub mod __private {
     use super::*;
 
     pub struct Init {
-        pub name: &'static str,
         #[expect(clippy::type_complexity)]
         pub init: fn() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>,
+        pub names: &'static [&'static str],
         pub deps: &'static [&'static str],
     }
 
