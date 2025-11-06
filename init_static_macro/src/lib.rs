@@ -102,7 +102,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         #[linkme(crate = ::init_static::__private::linkme)]
         static #init_fn_ident: ::init_static::__private::Init = {
             #[allow(non_snake_case)]
-            fn #init_fn_ident() -> std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>> {
+            fn #init_fn_ident() -> std::pin::Pin<Box<dyn Future<Output = Result<(), ::init_static::__private::BoxError>>>> {
                 Box::pin(async {
                     #init_stmts
                     Ok(())

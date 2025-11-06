@@ -9,6 +9,8 @@ use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 pub use init_static_macro::init_static;
 
+use crate::__private::{BoxError, INIT};
+
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
 /// This function iterates over all init functions registered via the macro and executes them once.
@@ -34,12 +36,12 @@ pub use init_static_macro::init_static;
 /// ```
 pub async fn init_static() -> Result<(), InitError> {
     let mut name_map: HashMap<&'static str, Vec<usize>> = HashMap::new();
-    for (i, init) in __private::INIT.iter().enumerate() {
+    for (i, init) in INIT.iter().enumerate() {
         for name in init.names {
             name_map.entry(name).or_default().push(i);
         }
     }
-    let mut adjacent = __private::INIT
+    let mut adjacent = INIT
         .iter()
         .enumerate()
         .map(|(i, init)| {
@@ -73,16 +75,16 @@ pub async fn init_static() -> Result<(), InitError> {
         for (_, deps) in &mut adjacent {
             deps.retain(|dep| !layer.contains(dep));
         }
-        join_set.extend(layer.into_iter().map(|i| (__private::INIT[i].init)()));
+        join_set.extend(layer.into_iter().map(|i| (INIT[i].init)()));
         if join_set.is_empty() {
             return Err(InitError::CircularDependency {
                 names: adjacent
                     .iter()
-                    .flat_map(|(i, _)| __private::INIT[*i].names.iter().cloned())
+                    .flat_map(|(i, _)| INIT[*i].names.iter().cloned())
                     .collect(),
             });
         }
-        join_set.next().await.unwrap().map_err(InitError::RuntimeError)?;
+        join_set.next().await.unwrap().map_err(InitError::InitializationError)?;
     }
     Ok(())
 }
@@ -96,7 +98,7 @@ pub enum InitError {
     CircularDependency {
         names: Vec<&'static str>,
     },
-    RuntimeError(Box<dyn Error>),
+    InitializationError(BoxError),
 }
 
 impl Display for InitError {
@@ -111,7 +113,7 @@ impl Display for InitError {
             InitError::CircularDependency { names } => {
                 write!(f, "Circular dependency detected among: {:?}", names)
             }
-            InitError::RuntimeError(e) => Display::fmt(e, f),
+            InitError::InitializationError(e) => Display::fmt(e, f),
         }
     }
 }
@@ -119,7 +121,7 @@ impl Display for InitError {
 impl Error for InitError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            InitError::RuntimeError(e) => Some(&**e),
+            InitError::InitializationError(e) => Some(&**e),
             _ => None,
         }
     }
@@ -191,9 +193,18 @@ pub mod __private {
 
     use super::*;
 
+    #[cfg(all(feature = "send", feature = "sync"))]
+    pub type BoxError = Box<dyn Error + Send + Sync>;
+    #[cfg(all(feature = "send", not(feature = "sync")))]
+    pub type BoxError = Box<dyn Error + Send>;
+    #[cfg(all(not(feature = "send"), feature = "sync"))]
+    pub type BoxError = Box<dyn Error + Sync>;
+    #[cfg(all(not(feature = "send"), not(feature = "sync")))]
+    pub type BoxError = Box<dyn Error>;
+
     pub struct Init {
         #[expect(clippy::type_complexity)]
-        pub init: fn() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>,
+        pub init: fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>>>>,
         pub names: &'static [&'static str],
         pub deps: &'static [&'static str],
     }

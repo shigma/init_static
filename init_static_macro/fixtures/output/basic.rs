@@ -14,7 +14,7 @@ static V4: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
 static INIT_STATIC_V1_V2_V3_V4: ::init_static::__private::Init = {
     #[allow(non_snake_case)]
     fn INIT_STATIC_V1_V2_V3_V4() -> std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>,
+        Box<dyn Future<Output = Result<(), ::init_static::__private::BoxError>>>,
     > {
         Box::pin(async {
             ::init_static::InitStatic::init(&V1, N1);
@@ -40,7 +40,7 @@ static V5: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
 static INIT_STATIC_V5: ::init_static::__private::Init = {
     #[allow(non_snake_case)]
     fn INIT_STATIC_V5() -> std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn ::std::error::Error>>>>,
+        Box<dyn Future<Output = Result<(), ::init_static::__private::BoxError>>>,
     > {
         Box::pin(async {
             let x = 42;
