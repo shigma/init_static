@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 pub use init_static_macro::init_static;
 
-use crate::__private::{BoxError, INIT};
+use crate::__private::INIT;
 
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
@@ -98,7 +98,7 @@ pub enum InitError {
     CircularDependency {
         names: Vec<&'static str>,
     },
-    InitializationError(BoxError),
+    InitializationError(anyhow::Error),
 }
 
 impl Display for InitError {
@@ -189,22 +189,12 @@ impl<T: Debug> Debug for InitStatic<T> {
 pub mod __private {
     use std::pin::Pin;
 
-    pub use linkme;
+    pub use {anyhow, linkme};
 
-    use super::*;
-
-    #[cfg(all(feature = "send", feature = "sync"))]
-    pub type BoxError = Box<dyn Error + Send + Sync>;
-    #[cfg(all(feature = "send", not(feature = "sync")))]
-    pub type BoxError = Box<dyn Error + Send>;
-    #[cfg(all(not(feature = "send"), feature = "sync"))]
-    pub type BoxError = Box<dyn Error + Sync>;
-    #[cfg(all(not(feature = "send"), not(feature = "sync")))]
-    pub type BoxError = Box<dyn Error>;
+    type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
     pub struct Init {
-        #[expect(clippy::type_complexity)]
-        pub init: fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>>>>,
+        pub init: fn() -> BoxFuture<anyhow::Result<()>>,
         pub names: &'static [&'static str],
         pub deps: &'static [&'static str],
     }
