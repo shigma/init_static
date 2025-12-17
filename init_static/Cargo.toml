@@ -1,6 +1,6 @@
 [package]
 name = "init_static"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 authors = [
@@ -15,9 +15,11 @@ send = []
 sync = []
 
 [dependencies]
+anyhow = "1.0"
 futures-util = "0.3.31"
-init_static_macro = { version = "0.2.2", path = "../init_static_macro" }
+init_static_macro = { version = "0.3.0", path = "../init_static_macro" }
 linkme = "0.3.35"
 
 [dev-dependencies]
+anyhow = "1.0.100"
 tokio = { version = "1.48.0", features = ["full"] }
