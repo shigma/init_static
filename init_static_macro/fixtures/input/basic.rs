@@ -12,6 +12,7 @@ init_static! {
     const N1: u32 = 42;
     static V5: u32 = {
         let x = 42;
+        let _y = Vec::<()>::new();
         const N2: u32 = 42;
         *V1 + N1 + N2 + x
     };

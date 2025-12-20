@@ -177,7 +177,12 @@ struct Scope<'i, 'ast> {
 
 impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
     fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
-        if expr_path.qself.is_none() && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident)) {
+        if expr_path.qself.is_none()
+            && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident))
+            // We only consider ALL_CAPS identifiers as statics here.
+            && let Some(last_segment) = expr_path.path.segments.last()
+            && last_segment.ident == last_segment.ident.to_string().to_ascii_uppercase()
+        {
             self.free.insert(Path::new(&expr_path.path));
         }
         syn::visit::visit_expr_path(self, expr_path);

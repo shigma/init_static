@@ -125,6 +125,7 @@ const _: () = {
                     &V5,
                     {
                         let x = 42;
+                        let _y = Vec::<()>::new();
                         const N2: u32 = 42;
                         *V1 + N1 + N2 + x
                     },
