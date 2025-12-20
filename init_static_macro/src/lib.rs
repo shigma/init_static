@@ -65,9 +65,11 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
-        let mut free = BTreeSet::new();
+        let mut is_async = false;
+        let mut free_paths = BTreeSet::new();
         let mut scope = Scope {
-            free: &mut free,
+            is_async: &mut is_async,
+            free_paths: &mut free_paths,
             locals: HashSet::new(),
         };
         scope.visit_item_static(&item_static);
@@ -85,11 +87,11 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             #item_vis static #item_mut #item_ident: ::init_static::InitStatic<#item_ty> = #init_static;
         });
 
-        let (deps_ident, deps_item) = if free.is_empty() {
+        let (deps_ident, deps_item) = if free_paths.is_empty() {
             (quote! { ::std::vec::Vec::new }, quote! {})
         } else {
             let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), span);
-            let deps_stmts = free.iter().map(|path| {
+            let deps_stmts = free_paths.iter().map(|path| {
                 let path = &path.path;
                 quote! {
                     (&#path).__get_symbol()
@@ -108,21 +110,40 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         };
 
         let init_ident = syn::Ident::new(&format!("INIT_{item_ident}"), item_ident.span());
+        let (init_variant, init_item) = if is_async {
+            (
+                quote! { Async },
+                quote! {
+                    #[allow(non_snake_case)]
+                    fn #init_ident() -> ::init_static::__private::BoxFuture<::init_static::__private::anyhow::Result<()>> {
+                        Box::pin(async {
+                            ::init_static::InitStatic::init(&#item_ident, #item_expr);
+                            Ok(())
+                        })
+                    }
+                },
+            )
+        } else {
+            (
+                quote! { Sync },
+                quote! {
+                    #[allow(non_snake_case)]
+                    fn #init_ident() -> ::init_static::__private::anyhow::Result<()> {
+                        ::init_static::InitStatic::init(&#item_ident, #item_expr);
+                        Ok(())
+                    }
+                },
+            )
+        };
         inner.extend(quote! {
             #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
             #[linkme(crate = ::init_static::__private::linkme)]
             static #init_ident: ::init_static::__private::Init = {
-                #[allow(non_snake_case)]
-                fn #init_ident() -> ::init_static::__private::BoxFuture<::init_static::__private::anyhow::Result<()>> {
-                    Box::pin(async {
-                        ::init_static::InitStatic::init(&#item_ident, #item_expr);
-                        Ok(())
-                    })
-                }
+                #init_item
                 #deps_item
                 ::init_static::__private::Init {
                     symbol: ::init_static::InitStatic::symbol(&#item_ident),
-                    init: #init_ident,
+                    init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
                 }
             };
@@ -170,8 +191,9 @@ impl<'ast> ::std::cmp::Ord for Path<'ast> {
     }
 }
 
-struct Scope<'i, 'ast> {
-    free: &'i mut BTreeSet<Path<'ast>>,
+struct Scope<'a, 'ast> {
+    is_async: &'a mut bool,
+    free_paths: &'a mut BTreeSet<Path<'ast>>,
     locals: HashSet<&'ast syn::Ident>,
 }
 
@@ -183,7 +205,7 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
             && let Some(last_segment) = expr_path.path.segments.last()
             && last_segment.ident == last_segment.ident.to_string().to_ascii_uppercase()
         {
-            self.free.insert(Path::new(&expr_path.path));
+            self.free_paths.insert(Path::new(&expr_path.path));
         }
         syn::visit::visit_expr_path(self, expr_path);
     }
@@ -209,7 +231,8 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
             }
         }
         let mut scope = Scope {
-            free: self.free,
+            is_async: self.is_async,
+            free_paths: self.free_paths,
             locals: locals.union(&self.locals).cloned().collect(),
         };
         for stmt in &block.stmts {
@@ -244,7 +267,8 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
             self.visit_attribute(attrs);
         }
         let mut scope = Scope {
-            free: self.free,
+            is_async: self.is_async,
+            free_paths: self.free_paths,
             locals: self.locals.clone(),
         };
         for pat in &expr_closure.inputs {
@@ -253,6 +277,11 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
         scope.visit_return_type(&expr_closure.output);
         scope.visit_expr(&expr_closure.body);
         // syn::visit::visit_expr_closure(self, expr_closure);
+    }
+
+    fn visit_expr_await(&mut self, expr_await: &'ast syn::ExprAwait) {
+        *self.is_async = true;
+        syn::visit::visit_expr_await(self, expr_await);
     }
 }
 

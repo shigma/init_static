@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 pub use init_static_macro::init_static;
 
-use crate::__private::INIT;
+use crate::__private::{INIT, InitFn};
 pub use crate::init_static::{InitStatic, Symbol};
 
 mod init_static;
@@ -92,28 +92,42 @@ pub async fn init_static() -> Result<(), InitError> {
             .extract_if(.., |(_, deps)| deps.is_empty())
             .map(|(i, _)| i)
             .collect::<HashSet<_>>();
-        join_set.extend(layer.into_iter().map(|i| async move {
-            if options.debug {
-                eprintln!("init_static: begin {}", INIT[i].symbol);
+        let mut has_sync = false;
+        for i in layer {
+            match &INIT[i].init {
+                InitFn::Sync(f) => {
+                    has_sync = true;
+                    if options.debug {
+                        eprintln!("init_static: sync {}", INIT[i].symbol);
+                    }
+                    f()?;
+                    for (_, deps) in &mut adjacent {
+                        deps.remove(&i);
+                    }
+                }
+                InitFn::Async(f) => join_set.push(async move {
+                    if options.debug {
+                        eprintln!("init_static: async begin {}", INIT[i].symbol);
+                    }
+                    let output = f().await;
+                    if options.debug {
+                        eprintln!("init_static: async end {}", INIT[i].symbol);
+                    }
+                    output.map(|_| i)
+                }),
             }
-            let output = (INIT[i].init)().await;
-            if options.debug {
-                eprintln!("init_static: end {}", INIT[i].symbol);
-            }
-            output.map(|_| i)
-        }));
+        }
+        if has_sync {
+            continue;
+        }
         if join_set.is_empty() {
             return Err(InitError::Circular {
                 symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
             });
         }
-        match join_set.next().await.unwrap() {
-            Ok(i) => {
-                for (_, deps) in &mut adjacent {
-                    deps.remove(&i);
-                }
-            }
-            Err(e) => return Err(InitError::Execution(e)),
+        let i = join_set.next().await.unwrap()?;
+        for (_, deps) in &mut adjacent {
+            deps.remove(&i);
         }
     }
 
@@ -125,6 +139,13 @@ pub enum InitError {
     Ambiguous { symbol: &'static Symbol },
     Circular { symbols: Vec<&'static Symbol> },
     Execution(anyhow::Error),
+}
+
+impl From<anyhow::Error> for InitError {
+    #[inline]
+    fn from(e: anyhow::Error) -> Self {
+        Self::Execution(e)
+    }
 }
 
 impl Display for InitError {
@@ -165,9 +186,14 @@ pub mod __private {
 
     pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
+    pub enum InitFn {
+        Sync(fn() -> anyhow::Result<()>),
+        Async(fn() -> BoxFuture<anyhow::Result<()>>),
+    }
+
     pub struct Init {
         pub symbol: &'static Symbol,
-        pub init: fn() -> BoxFuture<anyhow::Result<()>>,
+        pub init: InitFn,
         pub deps: fn() -> Vec<Option<&'static Symbol>>,
     }
 

@@ -16,13 +16,9 @@ const _: () = {
     #[linkme(crate = ::init_static::__private::linkme)]
     static INIT_V1: ::init_static::__private::Init = {
         #[allow(non_snake_case)]
-        fn INIT_V1() -> ::init_static::__private::BoxFuture<
-            ::init_static::__private::anyhow::Result<()>,
-        > {
-            Box::pin(async {
-                ::init_static::InitStatic::init(&V1, N1);
-                Ok(())
-            })
+        fn INIT_V1() -> ::init_static::__private::anyhow::Result<()> {
+            ::init_static::InitStatic::init(&V1, N1);
+            Ok(())
         }
         #[allow(non_snake_case, clippy::needless_borrow)]
         fn DEPS_V1() -> ::std::vec::Vec<
@@ -33,7 +29,7 @@ const _: () = {
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V1),
-            init: INIT_V1,
+            init: ::init_static::__private::InitFn::Sync(INIT_V1),
             deps: DEPS_V1,
         }
     };
@@ -43,17 +39,13 @@ const _: () = {
     #[linkme(crate = ::init_static::__private::linkme)]
     static INIT_V2: ::init_static::__private::Init = {
         #[allow(non_snake_case)]
-        fn INIT_V2() -> ::init_static::__private::BoxFuture<
-            ::init_static::__private::anyhow::Result<()>,
-        > {
-            Box::pin(async {
-                ::init_static::InitStatic::init(&V2, "42".parse()?);
-                Ok(())
-            })
+        fn INIT_V2() -> ::init_static::__private::anyhow::Result<()> {
+            ::init_static::InitStatic::init(&V2, "42".parse()?);
+            Ok(())
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V2),
-            init: INIT_V2,
+            init: ::init_static::__private::InitFn::Sync(INIT_V2),
             deps: ::std::vec::Vec::new,
         }
     };
@@ -80,7 +72,7 @@ const _: () = {
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V3),
-            init: INIT_V3,
+            init: ::init_static::__private::InitFn::Async(INIT_V3),
             deps: DEPS_V3,
         }
     };
@@ -100,7 +92,7 @@ const _: () = {
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V4),
-            init: INIT_V4,
+            init: ::init_static::__private::InitFn::Async(INIT_V4),
             deps: ::std::vec::Vec::new,
         }
     };
@@ -117,21 +109,17 @@ const _: () = {
     #[linkme(crate = ::init_static::__private::linkme)]
     static INIT_V5: ::init_static::__private::Init = {
         #[allow(non_snake_case)]
-        fn INIT_V5() -> ::init_static::__private::BoxFuture<
-            ::init_static::__private::anyhow::Result<()>,
-        > {
-            Box::pin(async {
-                ::init_static::InitStatic::init(
-                    &V5,
-                    {
-                        let x = 42;
-                        let _y = Vec::<()>::new();
-                        const N2: u32 = 42;
-                        *V1 + N1 + N2 + x
-                    },
-                );
-                Ok(())
-            })
+        fn INIT_V5() -> ::init_static::__private::anyhow::Result<()> {
+            ::init_static::InitStatic::init(
+                &V5,
+                {
+                    let x = 42;
+                    let _y = Vec::<()>::new();
+                    const N2: u32 = 42;
+                    *V1 + N1 + N2 + x
+                },
+            );
+            Ok(())
         }
         #[allow(non_snake_case, clippy::needless_borrow)]
         fn DEPS_V5() -> ::std::vec::Vec<
@@ -142,7 +130,7 @@ const _: () = {
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V5),
-            init: INIT_V5,
+            init: ::init_static::__private::InitFn::Sync(INIT_V5),
             deps: DEPS_V5,
         }
     };
