@@ -35,7 +35,7 @@ macro_rules! InitStatic {
 /// ergonomics of `lazy_static!`.
 ///
 /// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
-/// [`init_static`]. Accessing an uninitialized value will panic.
+/// [`init_static`](crate::init_static). Accessing an uninitialized value will panic.
 pub struct InitStatic<T> {
     symbol: &'static Symbol,
     inner: OnceLock<T>,
@@ -61,7 +61,7 @@ impl<T> InitStatic<T> {
     pub fn init(this: &Self, value: T) {
         this.inner
             .set(value)
-            .unwrap_or_else(|_| panic!("InitStatic is already initialized."));
+            .unwrap_or_else(|_| panic!("Double initialization of init_static: {}", this.symbol));
     }
 
     #[inline]
@@ -77,7 +77,7 @@ impl<T> Deref for InitStatic<T> {
     fn deref(&self) -> &Self::Target {
         self.inner
             .get()
-            .expect("InitStatic is not initialized. Call `init_static` first!")
+            .unwrap_or_else(|| panic!("Access to uninitialized init_static: {}", self.symbol))
     }
 }
 
@@ -86,7 +86,7 @@ impl<T> DerefMut for InitStatic<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
             .get_mut()
-            .expect("InitStatic is not initialized. Call `init_static` first!")
+            .unwrap_or_else(|| panic!("Access to uninitialized init_static: {}", self.symbol))
     }
 }
 
