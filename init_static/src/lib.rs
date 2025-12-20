@@ -2,35 +2,15 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display};
-use std::ops::{Deref, DerefMut};
-use std::sync::OnceLock;
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 pub use init_static_macro::init_static;
 
 use crate::__private::INIT;
+pub use crate::init_static::{InitStatic, Symbol};
 
-// TODO: custom impl for Debug?
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct Symbol {
-    pub module: &'static str,
-    pub line: u32,
-    pub column: u32,
-    pub ident: &'static str,
-}
-
-#[macro_export]
-macro_rules! InitStatic {
-    ($ident:ident) => {
-        $crate::InitStatic::new(&$crate::Symbol {
-            module: module_path!(),
-            line: line!(),
-            column: column!(),
-            ident: stringify!($ident),
-        })
-    };
-}
+mod init_static;
 
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
@@ -123,79 +103,14 @@ impl Error for InitError {
     }
 }
 
-/// A wrapper around [`OnceLock`] providing safe initialization and [`Deref`] support to mimic the
-/// ergonomics of `lazy_static!`.
-///
-/// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
-/// [`init_static`]. Accessing an uninitialized value will panic.
-pub struct InitStatic<T> {
-    symbol: &'static Symbol,
-    inner: OnceLock<T>,
-}
-
-impl<T> InitStatic<T> {
-    /// Creates a new uninitialized `InitStatic`.
-    ///
-    /// The value must be initialized using [`InitStatic::init`] or via the initialization registry
-    /// before access.
-    #[inline]
-    pub const fn new(symbol: &'static Symbol) -> Self {
-        Self {
-            symbol,
-            inner: OnceLock::new(),
-        }
-    }
-
-    /// Initializes the given static value.
-    ///
-    /// This must be called exactly once. Subsequent calls will panic.
-    #[inline]
-    pub fn init(this: &Self, value: T) {
-        this.inner
-            .set(value)
-            .unwrap_or_else(|_| panic!("InitStatic is already initialized."));
-    }
-
-    #[inline]
-    pub const fn symbol(this: &Self) -> &'static Symbol {
-        this.symbol
-    }
-}
-
-impl<T> Deref for InitStatic<T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.inner
-            .get()
-            .expect("InitStatic is not initialized. Call init_static() first!")
-    }
-}
-
-impl<T> DerefMut for InitStatic<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner
-            .get_mut()
-            .expect("InitStatic is not initialized. Call init_static() first!")
-    }
-}
-
-impl<T: Debug> Debug for InitStatic<T> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("InitStatic").field(&**self).finish()
-    }
-}
-
 #[doc(hidden)]
 pub mod __private {
     use std::pin::Pin;
 
     pub use {anyhow, linkme};
 
-    use crate::{InitStatic, Symbol};
+    use crate::Symbol;
+    pub use crate::init_static::MaybeInitStatic;
 
     pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
@@ -207,26 +122,4 @@ pub mod __private {
 
     #[linkme::distributed_slice]
     pub static INIT: [Init];
-
-    pub trait MaybeInitStatic {
-        fn __get_symbol(&self) -> Option<&'static Symbol>;
-    }
-
-    impl<T> MaybeInitStatic for InitStatic<T> {
-        #[inline]
-        fn __get_symbol(&self) -> Option<&'static Symbol> {
-            Some(self.symbol)
-        }
-    }
-
-    impl<T> MaybeInitStatic for &T {
-        #[inline]
-        fn __get_symbol(&self) -> Option<&'static Symbol> {
-            None
-        }
-    }
-
-    pub fn empty_vec<T>() -> Vec<T> {
-        Vec::new()
-    }
 }
