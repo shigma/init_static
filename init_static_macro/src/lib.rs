@@ -65,9 +65,11 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
+        let mut is_try = false;
         let mut is_async = false;
         let mut free_paths = BTreeSet::new();
         let mut scope = Scope {
+            is_try: &mut is_try,
             is_async: &mut is_async,
             free_paths: &mut free_paths,
             locals: HashSet::new(),
@@ -80,11 +82,24 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let item_ty = &item_static.ty;
         let item_expr = &item_static.expr;
         let span = item_ident.span();
-        let init_static = quote_spanned! { span =>
-            ::init_static::InitStatic!(#item_ident)
+        let (static_ty, static_expr, init_stmt, init_symbol) = if !is_try && !is_async {
+            free_paths.clear();
+            (
+                quote_spanned! { span => ::std::sync::LazyLock<#item_ty> },
+                quote_spanned! { span => ::std::sync::LazyLock::new(|| #item_expr) },
+                quote! { ::std::sync::LazyLock::force(&#item_ident); },
+                quote! { ::init_static::Symbol!(#item_ident) },
+            )
+        } else {
+            (
+                quote_spanned! { span => ::init_static::InitStatic<#item_ty> },
+                quote_spanned! { span => ::init_static::InitStatic!(#item_ident) },
+                quote! { ::init_static::InitStatic::init(&#item_ident, #item_expr); },
+                quote! { ::init_static::InitStatic::symbol(&#item_ident) },
+            )
         };
         output.extend(quote! {
-            #item_vis static #item_mut #item_ident: ::init_static::InitStatic<#item_ty> = #init_static;
+            #item_vis static #item_mut #item_ident: #static_ty = #static_expr;
         });
 
         let (deps_ident, deps_item) = if free_paths.is_empty() {
@@ -117,7 +132,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                     #[allow(non_snake_case)]
                     fn #init_ident() -> ::init_static::__private::BoxFuture<::init_static::__private::anyhow::Result<()>> {
                         Box::pin(async {
-                            ::init_static::InitStatic::init(&#item_ident, #item_expr);
+                            #init_stmt
                             Ok(())
                         })
                     }
@@ -129,7 +144,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 quote! {
                     #[allow(non_snake_case)]
                     fn #init_ident() -> ::init_static::__private::anyhow::Result<()> {
-                        ::init_static::InitStatic::init(&#item_ident, #item_expr);
+                        #init_stmt
                         Ok(())
                     }
                 },
@@ -142,7 +157,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 #init_item
                 #deps_item
                 ::init_static::__private::Init {
-                    symbol: ::init_static::InitStatic::symbol(&#item_ident),
+                    symbol: #init_symbol,
                     init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
                 }
@@ -192,6 +207,7 @@ impl<'ast> ::std::cmp::Ord for Path<'ast> {
 }
 
 struct Scope<'a, 'ast> {
+    is_try: &'a mut bool,
     is_async: &'a mut bool,
     free_paths: &'a mut BTreeSet<Path<'ast>>,
     locals: HashSet<&'ast syn::Ident>,
@@ -231,6 +247,7 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
             }
         }
         let mut scope = Scope {
+            is_try: self.is_try,
             is_async: self.is_async,
             free_paths: self.free_paths,
             locals: locals.union(&self.locals).cloned().collect(),
@@ -267,6 +284,7 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
             self.visit_attribute(attrs);
         }
         let mut scope = Scope {
+            is_try: self.is_try,
             is_async: self.is_async,
             free_paths: self.free_paths,
             locals: self.locals.clone(),
@@ -277,6 +295,11 @@ impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
         scope.visit_return_type(&expr_closure.output);
         scope.visit_expr(&expr_closure.body);
         // syn::visit::visit_expr_closure(self, expr_closure);
+    }
+
+    fn visit_expr_try(&mut self, expr_try: &'ast syn::ExprTry) {
+        *self.is_try = true;
+        syn::visit::visit_expr_try(self, expr_try);
     }
 
     fn visit_expr_await(&mut self, expr_await: &'ast syn::ExprAwait) {

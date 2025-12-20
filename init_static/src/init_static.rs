@@ -20,14 +20,21 @@ impl Display for Symbol {
 }
 
 #[macro_export]
-macro_rules! InitStatic {
+macro_rules! Symbol {
     ($ident:ident) => {
-        $crate::InitStatic::new(&$crate::Symbol {
+        &$crate::Symbol {
             module: module_path!(),
             line: line!(),
             column: column!(),
             ident: stringify!($ident),
-        })
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! InitStatic {
+    ($ident:ident) => {
+        $crate::InitStatic::new($crate::Symbol!($ident))
     };
 }
 
