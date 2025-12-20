@@ -92,21 +92,29 @@ pub async fn init_static() -> Result<(), InitError> {
             .extract_if(.., |(_, deps)| deps.is_empty())
             .map(|(i, _)| i)
             .collect::<HashSet<_>>();
-        for (_, deps) in &mut adjacent {
-            deps.retain(|dep| !layer.contains(dep));
-        }
-        join_set.extend(layer.into_iter().map(|i| {
+        join_set.extend(layer.into_iter().map(|i| async move {
             if options.debug {
-                eprintln!("init_static: {}", INIT[i].symbol);
+                eprintln!("init_static: begin {}", INIT[i].symbol);
             }
-            (INIT[i].init)()
+            let output = (INIT[i].init)().await;
+            if options.debug {
+                eprintln!("init_static: end {}", INIT[i].symbol);
+            }
+            output.map(|_| i)
         }));
         if join_set.is_empty() {
             return Err(InitError::Circular {
                 symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
             });
         }
-        join_set.next().await.unwrap().map_err(InitError::InitializationError)?;
+        match join_set.next().await.unwrap() {
+            Ok(i) => {
+                for (_, deps) in &mut adjacent {
+                    deps.remove(&i);
+                }
+            }
+            Err(e) => return Err(InitError::Execution(e)),
+        }
     }
 
     Ok(())
@@ -116,23 +124,23 @@ pub async fn init_static() -> Result<(), InitError> {
 pub enum InitError {
     Ambiguous { symbol: &'static Symbol },
     Circular { symbols: Vec<&'static Symbol> },
-    InitializationError(anyhow::Error),
+    Execution(anyhow::Error),
 }
 
 impl Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InitError::Ambiguous { symbol } => {
+            Self::Ambiguous { symbol } => {
                 write!(f, "Symbol {symbol} is defined multiple times.")
             }
-            InitError::Circular { symbols } => {
+            Self::Circular { symbols } => {
                 writeln!(f, "Circular dependency detected among:")?;
                 for symbol in symbols {
                     writeln!(f, "    {symbol}")?;
                 }
                 Ok(())
             }
-            InitError::InitializationError(e) => Display::fmt(e, f),
+            Self::Execution(e) => Display::fmt(e, f),
         }
     }
 }
@@ -140,7 +148,7 @@ impl Display for InitError {
 impl Error for InitError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            InitError::InitializationError(e) => Some(&**e),
+            Self::Execution(e) => Some(&**e),
             _ => None,
         }
     }
