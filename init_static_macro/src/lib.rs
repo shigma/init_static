@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -65,7 +65,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
-        let mut free = HashSet::new();
+        let mut free = BTreeSet::new();
         let mut scope = Scope {
             free: &mut free,
             locals: HashSet::new(),
@@ -86,6 +86,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         } else {
             let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), item_ident.span());
             let deps_stmts = free.iter().map(|path| {
+                let path = &path.path;
                 quote! {
                     (&#path).__get_symbol()
                 }
@@ -133,15 +134,47 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
     }
 }
 
+struct Path<'ast> {
+    path: &'ast syn::Path,
+    repr: String,
+}
+
+impl<'ast> Path<'ast> {
+    fn new(inner: &'ast syn::Path) -> Self {
+        let repr = quote! { #inner }.to_string();
+        Self { path: inner, repr }
+    }
+}
+
+impl<'ast> ::std::cmp::PartialEq for Path<'ast> {
+    fn eq(&self, other: &Self) -> bool {
+        self.repr == other.repr
+    }
+}
+
+impl<'ast> ::std::cmp::Eq for Path<'ast> {}
+
+impl<'ast> ::std::cmp::PartialOrd for Path<'ast> {
+    fn partial_cmp(&self, other: &Self) -> Option<::std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'ast> ::std::cmp::Ord for Path<'ast> {
+    fn cmp(&self, other: &Self) -> ::std::cmp::Ordering {
+        self.repr.cmp(&other.repr)
+    }
+}
+
 struct Scope<'i, 'ast> {
-    free: &'i mut HashSet<&'ast syn::Path>,
+    free: &'i mut BTreeSet<Path<'ast>>,
     locals: HashSet<&'ast syn::Ident>,
 }
 
 impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
     fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
         if expr_path.qself.is_none() && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident)) {
-            self.free.insert(&expr_path.path);
+            self.free.insert(Path::new(&expr_path.path));
         }
         syn::visit::visit_expr_path(self, expr_path);
     }
