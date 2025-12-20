@@ -1,11 +1,11 @@
 use init_static::init_static;
 
 init_static! {
-    static BAR: u32 = *FOO;
+    static FOO: u32 = *BAR;
 }
 
 init_static! {
-    static FOO: u32 = "42".parse()?;
+    static BAR: u32 = "42".parse()?;
 }
 
 #[tokio::test]

@@ -4,13 +4,19 @@ use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 
-// TODO: custom impl for Debug?
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Symbol {
     pub module: &'static str,
     pub line: u32,
     pub column: u32,
     pub ident: &'static str,
+}
+
+impl Display for Symbol {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (at {}:{}:{})", self.ident, self.module, self.line, self.column)
+    }
 }
 
 #[macro_export]
@@ -71,7 +77,7 @@ impl<T> Deref for InitStatic<T> {
     fn deref(&self) -> &Self::Target {
         self.inner
             .get()
-            .expect("InitStatic is not initialized. Call init_static() first!")
+            .expect("InitStatic is not initialized. Call `init_static` first!")
     }
 }
 
@@ -80,7 +86,7 @@ impl<T> DerefMut for InitStatic<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
             .get_mut()
-            .expect("InitStatic is not initialized. Call init_static() first!")
+            .expect("InitStatic is not initialized. Call `init_static` first!")
     }
 }
 

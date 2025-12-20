@@ -2,6 +2,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display};
+use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -11,6 +12,29 @@ use crate::__private::INIT;
 pub use crate::init_static::{InitStatic, Symbol};
 
 mod init_static;
+
+struct InitOptionsInner {
+    debug: bool,
+}
+
+pub struct InitOptions {
+    inner: Mutex<Option<InitOptionsInner>>,
+}
+
+impl InitOptions {
+    pub fn debug(&self, debug: bool) {
+        self.inner
+            .lock()
+            .unwrap()
+            .as_mut()
+            .expect("INIT_OPTIONS can only be modified before `init_static` is called.")
+            .debug = debug;
+    }
+}
+
+pub static INIT_OPTIONS: InitOptions = InitOptions {
+    inner: Mutex::new(Some(InitOptionsInner { debug: false })),
+};
 
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
@@ -36,12 +60,20 @@ mod init_static;
 /// }
 /// ```
 pub async fn init_static() -> Result<(), InitError> {
+    let options = INIT_OPTIONS
+        .inner
+        .lock()
+        .unwrap()
+        .take()
+        .expect("`init_static` can only be called once.");
+
     let mut symbol_map: HashMap<&'static Symbol, usize> = HashMap::new();
     for (i, init) in INIT.iter().enumerate() {
         if symbol_map.insert(init.symbol, i).is_some() {
             return Err(InitError::Ambiguous { symbol: init.symbol });
         }
     }
+
     let mut adjacent = INIT
         .iter()
         .enumerate()
@@ -53,6 +85,7 @@ pub async fn init_static() -> Result<(), InitError> {
             (i, deps)
         })
         .collect::<Vec<_>>();
+
     let mut join_set = FuturesUnordered::new();
     while !adjacent.is_empty() || !join_set.is_empty() {
         let layer = adjacent
@@ -62,7 +95,12 @@ pub async fn init_static() -> Result<(), InitError> {
         for (_, deps) in &mut adjacent {
             deps.retain(|dep| !layer.contains(dep));
         }
-        join_set.extend(layer.into_iter().map(|i| (INIT[i].init)()));
+        join_set.extend(layer.into_iter().map(|i| {
+            if options.debug {
+                eprintln!("init_static: {}", INIT[i].symbol);
+            }
+            (INIT[i].init)()
+        }));
         if join_set.is_empty() {
             return Err(InitError::Circular {
                 symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
@@ -70,6 +108,7 @@ pub async fn init_static() -> Result<(), InitError> {
         }
         join_set.next().await.unwrap().map_err(InitError::InitializationError)?;
     }
+
     Ok(())
 }
 
@@ -84,10 +123,14 @@ impl Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InitError::Ambiguous { symbol } => {
-                write!(f, "Symbol {symbol:?} is referenced by multiple InitStatic variables.")
+                write!(f, "Symbol {symbol} is defined multiple times.")
             }
             InitError::Circular { symbols } => {
-                write!(f, "Circular dependency detected among: {:?}", symbols)
+                writeln!(f, "Circular dependency detected among:")?;
+                for symbol in symbols {
+                    writeln!(f, "    {symbol}")?;
+                }
+                Ok(())
             }
             InitError::InitializationError(e) => Display::fmt(e, f),
         }

@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::visit::Visit;
 
@@ -77,14 +77,18 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let item_mut = &item_static.mutability;
         let item_ty = &item_static.ty;
         let item_expr = &item_static.expr;
+        let span = item_ident.span();
+        let init_static = quote_spanned! { span =>
+            ::init_static::InitStatic!(#item_ident)
+        };
         output.extend(quote! {
-            #item_vis static #item_mut #item_ident: ::init_static::InitStatic<#item_ty> = ::init_static::InitStatic!(#item_ident);
+            #item_vis static #item_mut #item_ident: ::init_static::InitStatic<#item_ty> = #init_static;
         });
 
         let (deps_ident, deps_item) = if free.is_empty() {
             (quote! { ::std::vec::Vec::new }, quote! {})
         } else {
-            let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), item_ident.span());
+            let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), span);
             let deps_stmts = free.iter().map(|path| {
                 let path = &path.path;
                 quote! {

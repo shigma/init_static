@@ -6,5 +6,6 @@ init_static! {
 
 #[tokio::test]
 async fn main() {
-    init_static().await.unwrap_err();
+    let e = init_static().await.unwrap_err();
+    assert_eq!(e.to_string(), "invalid digit found in string");
 }
