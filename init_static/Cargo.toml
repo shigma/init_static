@@ -11,8 +11,6 @@ repository = "https://github.com/shigma/init_static"
 documentation = "https://docs.rs/init_static"
 
 [features]
-send = []
-sync = []
 
 [dependencies]
 anyhow = "1.0"

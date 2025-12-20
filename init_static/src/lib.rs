@@ -11,6 +11,27 @@ pub use init_static_macro::init_static;
 
 use crate::__private::INIT;
 
+// TODO: custom impl for Debug?
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Symbol {
+    module: &'static str,
+    line: u32,
+    column: u32,
+    ident: &'static str,
+}
+
+#[macro_export]
+macro_rules! symbol {
+    ($ident:ident) => {
+        &$crate::Symbol {
+            module: module_path!(),
+            line: line!(),
+            column: column!(),
+            ident: stringify!($ident),
+        }
+    };
+}
+
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
 /// This function iterates over all init functions registered via the macro and executes them once.
@@ -35,37 +56,23 @@ use crate::__private::INIT;
 /// }
 /// ```
 pub async fn init_static() -> Result<(), InitError> {
-    let mut name_map: HashMap<&'static str, Vec<usize>> = HashMap::new();
+    let mut symbol_map: HashMap<&'static Symbol, usize> = HashMap::new();
     for (i, init) in INIT.iter().enumerate() {
-        for name in init.names {
-            name_map.entry(name).or_default().push(i);
+        if symbol_map.insert(init.symbol, i).is_some() {
+            return Err(InitError::Ambiguous { symbol: init.symbol });
         }
     }
     let mut adjacent = INIT
         .iter()
         .enumerate()
         .map(|(i, init)| {
-            let deps = init
-                .deps
-                .iter()
-                .filter_map(|name| {
-                    let indices = name_map.get(name)?;
-                    if indices.len() > 1 {
-                        Some(Err(InitError::AmbiguousDependency {
-                            dependents: init.names,
-                            dependency: name,
-                        }))
-                    } else {
-                        Some(Ok(indices[0]))
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>();
-            match deps {
-                Ok(deps) => Ok((i, deps)),
-                Err(e) => Err(e),
-            }
+            let deps = (init.deps)()
+                .into_iter()
+                .filter_map(|symbol| symbol_map.get(symbol).copied())
+                .collect::<HashSet<_>>();
+            (i, deps)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     let mut join_set = FuturesUnordered::new();
     while !adjacent.is_empty() || !join_set.is_empty() {
         let layer = adjacent
@@ -77,11 +84,8 @@ pub async fn init_static() -> Result<(), InitError> {
         }
         join_set.extend(layer.into_iter().map(|i| (INIT[i].init)()));
         if join_set.is_empty() {
-            return Err(InitError::CircularDependency {
-                names: adjacent
-                    .iter()
-                    .flat_map(|(i, _)| INIT[*i].names.iter().cloned())
-                    .collect(),
+            return Err(InitError::Circular {
+                symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
             });
         }
         join_set.next().await.unwrap().map_err(InitError::InitializationError)?;
@@ -91,27 +95,19 @@ pub async fn init_static() -> Result<(), InitError> {
 
 #[derive(Debug)]
 pub enum InitError {
-    AmbiguousDependency {
-        dependents: &'static [&'static str],
-        dependency: &'static str,
-    },
-    CircularDependency {
-        names: Vec<&'static str>,
-    },
+    Ambiguous { symbol: &'static Symbol },
+    Circular { symbols: Vec<&'static Symbol> },
     InitializationError(anyhow::Error),
 }
 
 impl Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InitError::AmbiguousDependency { dependents, dependency } => {
-                write!(
-                    f,
-                    "Cannot determine dependency {dependency} for {dependents:?}: multiple candidates found.",
-                )
+            InitError::Ambiguous { symbol } => {
+                write!(f, "Symbol {symbol:?} is referenced by multiple InitStatic variables.")
             }
-            InitError::CircularDependency { names } => {
-                write!(f, "Circular dependency detected among: {:?}", names)
+            InitError::Circular { symbols } => {
+                write!(f, "Circular dependency detected among: {:?}", symbols)
             }
             InitError::InitializationError(e) => Display::fmt(e, f),
         }
@@ -133,13 +129,8 @@ impl Error for InitError {
 /// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
 /// [`init_static`]. Accessing an uninitialized value will panic.
 pub struct InitStatic<T> {
+    symbol: &'static Symbol,
     inner: OnceLock<T>,
-}
-
-impl<T> Default for InitStatic<T> {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<T> InitStatic<T> {
@@ -147,13 +138,18 @@ impl<T> InitStatic<T> {
     ///
     /// The value must be initialized using [`InitStatic::init`] or via the initialization registry
     /// before access.
-    pub const fn new() -> Self {
-        Self { inner: OnceLock::new() }
+    #[inline]
+    pub const fn new(symbol: &'static Symbol) -> Self {
+        Self {
+            symbol,
+            inner: OnceLock::new(),
+        }
     }
 
     /// Initializes the given static value.
     ///
     /// This must be called exactly once. Subsequent calls will panic.
+    #[inline]
     pub fn init(this: &Self, value: T) {
         this.inner
             .set(value)
@@ -164,6 +160,7 @@ impl<T> InitStatic<T> {
 impl<T> Deref for InitStatic<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner
             .get()
@@ -172,6 +169,7 @@ impl<T> Deref for InitStatic<T> {
 }
 
 impl<T> DerefMut for InitStatic<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
             .get_mut()
@@ -180,8 +178,9 @@ impl<T> DerefMut for InitStatic<T> {
 }
 
 impl<T: Debug> Debug for InitStatic<T> {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.inner, f)
+        f.debug_tuple("InitStatic").field(&**self).finish()
     }
 }
 
@@ -191,14 +190,34 @@ pub mod __private {
 
     pub use {anyhow, linkme};
 
+    use crate::{InitStatic, Symbol};
+
     type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
     pub struct Init {
+        pub symbol: &'static Symbol,
         pub init: fn() -> BoxFuture<anyhow::Result<()>>,
-        pub names: &'static [&'static str],
-        pub deps: &'static [&'static str],
+        pub deps: fn() -> Vec<&'static Symbol>,
     }
 
     #[linkme::distributed_slice]
     pub static INIT: [Init];
+
+    pub trait MaybeInitStatic {
+        fn __get_symbol(&self) -> Option<&'static Symbol>;
+    }
+
+    impl<T> MaybeInitStatic for InitStatic<T> {
+        #[inline]
+        fn __get_symbol(&self) -> Option<&'static Symbol> {
+            Some(self.symbol)
+        }
+    }
+
+    impl<T> MaybeInitStatic for &T {
+        #[inline]
+        fn __get_symbol(&self) -> Option<&'static Symbol> {
+            None
+        }
+    }
 }
