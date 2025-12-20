@@ -14,21 +14,21 @@ use crate::__private::INIT;
 // TODO: custom impl for Debug?
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Symbol {
-    module: &'static str,
-    line: u32,
-    column: u32,
-    ident: &'static str,
+    pub module: &'static str,
+    pub line: u32,
+    pub column: u32,
+    pub ident: &'static str,
 }
 
 #[macro_export]
-macro_rules! symbol {
+macro_rules! InitStatic {
     ($ident:ident) => {
-        &$crate::Symbol {
+        $crate::InitStatic::new(&$crate::Symbol {
             module: module_path!(),
             line: line!(),
             column: column!(),
             ident: stringify!($ident),
-        }
+        })
     };
 }
 
@@ -68,7 +68,7 @@ pub async fn init_static() -> Result<(), InitError> {
         .map(|(i, init)| {
             let deps = (init.deps)()
                 .into_iter()
-                .filter_map(|symbol| symbol_map.get(symbol).copied())
+                .filter_map(|symbol| Some(*symbol_map.get(symbol?)?))
                 .collect::<HashSet<_>>();
             (i, deps)
         })
@@ -155,6 +155,11 @@ impl<T> InitStatic<T> {
             .set(value)
             .unwrap_or_else(|_| panic!("InitStatic is already initialized."));
     }
+
+    #[inline]
+    pub const fn symbol(this: &Self) -> &'static Symbol {
+        this.symbol
+    }
 }
 
 impl<T> Deref for InitStatic<T> {
@@ -192,12 +197,12 @@ pub mod __private {
 
     use crate::{InitStatic, Symbol};
 
-    type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
+    pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
     pub struct Init {
         pub symbol: &'static Symbol,
         pub init: fn() -> BoxFuture<anyhow::Result<()>>,
-        pub deps: fn() -> Vec<&'static Symbol>,
+        pub deps: fn() -> Vec<Option<&'static Symbol>>,
     }
 
     #[linkme::distributed_slice]
@@ -219,5 +224,9 @@ pub mod __private {
         fn __get_symbol(&self) -> Option<&'static Symbol> {
             None
         }
+    }
+
+    pub fn empty_vec<T>() -> Vec<T> {
+        Vec::new()
     }
 }

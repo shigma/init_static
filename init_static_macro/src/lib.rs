@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
-use proc_macro2::{Span as Span2, TokenStream as TokenStream2};
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::visit::Visit;
@@ -51,91 +51,109 @@ fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
 }
 
 pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
-    let stmts = match parse_repeated::<syn::Stmt>(input) {
-        Ok(stmts) => stmts,
+    let input_items = match parse_repeated::<syn::Item>(input) {
+        Ok(items) => items,
         Err(err) => return err.to_compile_error(),
     };
 
-    let mut init_items = TokenStream2::new();
-    let mut init_stmts = TokenStream2::new();
-    let mut fn_name = String::from("INIT_STATIC");
-    let mut names = vec![];
-    let init_deps = Scope::collect_free_idents(&stmts)
-        .iter()
-        .map(|name| quote! { #name, })
-        .collect::<TokenStream2>();
+    let mut output = TokenStream2::new();
+    let mut inner = TokenStream2::new();
 
-    for stmt in stmts {
-        match stmt {
-            syn::Stmt::Item(item) => match item {
-                syn::Item::Static(item_static) => {
-                    let vis = &item_static.vis;
-                    let ident = &item_static.ident;
-                    let mutability = &item_static.mutability;
-                    let ty = &item_static.ty;
-                    let expr = &item_static.expr;
-
-                    names.push(ident.to_string());
-                    fn_name.push('_');
-                    fn_name.push_str(ident.to_string().as_str());
-
-                    init_items.extend(quote! {
-                        #vis static #mutability #ident: ::init_static::InitStatic<#ty> = ::init_static::InitStatic::new();
-                    });
-                    init_stmts.extend(quote! {
-                        ::init_static::InitStatic::init(&#ident, #expr);
-                    });
-                }
-                _ => init_items.extend(quote! { #item }),
-            },
-            _ => init_stmts.extend(quote! { #stmt }),
-        }
-    }
-
-    let init_fn_ident = syn::Ident::new(&fn_name, Span2::call_site());
-    let init_names = names.iter().map(|name| quote! { #name, }).collect::<TokenStream2>();
-
-    quote! {
-        #init_items
-
-        #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
-        #[linkme(crate = ::init_static::__private::linkme)]
-        static #init_fn_ident: ::init_static::__private::Init = {
-            #[allow(non_snake_case)]
-            fn #init_fn_ident() -> std::pin::Pin<Box<dyn Future<Output = Result<(), ::init_static::__private::anyhow::Error>>>> {
-                Box::pin(async {
-                    #init_stmts
-                    Ok(())
-                })
-            }
-            ::init_static::__private::Init {
-                init: #init_fn_ident,
-                names: &[#init_names],
-                deps: &[#init_deps],
-            }
+    for item in input_items {
+        let syn::Item::Static(item_static) = item else {
+            output.extend(quote! { #item });
+            continue;
         };
-    }
-}
 
-struct Scope<'i, 'ast> {
-    free: &'i mut HashSet<String>,
-    locals: HashSet<&'ast syn::Ident>,
-}
-
-impl<'i, 'ast> Scope<'i, 'ast> {
-    fn collect_free_idents(stmts: &'ast [syn::Stmt]) -> HashSet<String> {
         let mut free = HashSet::new();
         let mut scope = Scope {
             free: &mut free,
             locals: HashSet::new(),
         };
-        scope.visit_block_stmts(stmts);
-        free
+        scope.visit_item_static(&item_static);
+
+        let item_vis = &item_static.vis;
+        let item_ident = &item_static.ident;
+        let item_mut = &item_static.mutability;
+        let item_ty = &item_static.ty;
+        let item_expr = &item_static.expr;
+        output.extend(quote! {
+            #item_vis static #item_mut #item_ident: ::init_static::InitStatic<#item_ty> = ::init_static::InitStatic!(#item_ident);
+        });
+
+        let (deps_ident, deps_item) = if free.is_empty() {
+            (quote! { ::std::vec::Vec::new }, quote! {})
+        } else {
+            let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), item_ident.span());
+            let deps_stmts = free.iter().map(|path| {
+                quote! {
+                    (&#path).__get_symbol()
+                }
+            });
+            (
+                quote! { #deps_ident },
+                quote! {
+                    #[allow(non_snake_case, clippy::needless_borrow)]
+                    fn #deps_ident() -> ::std::vec::Vec<::std::option::Option<&'static ::init_static::Symbol>> {
+                        use ::init_static::__private::MaybeInitStatic;
+                        ::std::vec![#(#deps_stmts),*]
+                    }
+                },
+            )
+        };
+
+        let init_ident = syn::Ident::new(&format!("INIT_{item_ident}"), item_ident.span());
+        inner.extend(quote! {
+            #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
+            #[linkme(crate = ::init_static::__private::linkme)]
+            static #init_ident: ::init_static::__private::Init = {
+                #[allow(non_snake_case)]
+                fn #init_ident() -> ::init_static::__private::BoxFuture<::init_static::__private::anyhow::Result<()>> {
+                    Box::pin(async {
+                        ::init_static::InitStatic::init(&#item_ident, #item_expr);
+                        Ok(())
+                    })
+                }
+                #deps_item
+                ::init_static::__private::Init {
+                    symbol: ::init_static::InitStatic::symbol(&#item_ident),
+                    init: #init_ident,
+                    deps: #deps_ident,
+                }
+            };
+        });
     }
 
-    fn visit_block_stmts(&mut self, stmts: &'ast [syn::Stmt]) {
+    quote! {
+        #output
+
+        const _: () = {
+            #inner
+        };
+    }
+}
+
+struct Scope<'i, 'ast> {
+    free: &'i mut HashSet<&'ast syn::Path>,
+    locals: HashSet<&'ast syn::Ident>,
+}
+
+impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
+    fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
+        if expr_path.qself.is_none() && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident)) {
+            self.free.insert(&expr_path.path);
+        }
+        syn::visit::visit_expr_path(self, expr_path);
+    }
+
+    fn visit_pat_ident(&mut self, pat_ident: &'ast syn::PatIdent) {
+        self.locals.insert(&pat_ident.ident);
+        syn::visit::visit_pat_ident(self, pat_ident);
+    }
+
+    fn visit_block(&mut self, block: &'ast syn::Block) {
         let mut locals = HashSet::new();
-        for stmt in stmts {
+        for stmt in &block.stmts {
             if let syn::Stmt::Item(item) = stmt {
                 match item {
                     syn::Item::Const(item_const) => {
@@ -152,7 +170,7 @@ impl<'i, 'ast> Scope<'i, 'ast> {
             free: self.free,
             locals: locals.union(&self.locals).cloned().collect(),
         };
-        for stmt in stmts {
+        for stmt in &block.stmts {
             match stmt {
                 syn::Stmt::Local(local) => {
                     for attrs in &local.attrs {
@@ -176,27 +194,6 @@ impl<'i, 'ast> Scope<'i, 'ast> {
             }
             scope.visit_stmt(stmt);
         }
-    }
-}
-
-impl<'i, 'ast> Visit<'ast> for Scope<'i, 'ast> {
-    fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
-        if expr_path.qself.is_none()
-            && self.locals.iter().all(|&ident| !expr_path.path.is_ident(ident))
-            && let Some(segment) = expr_path.path.segments.last()
-        {
-            self.free.insert(segment.ident.to_string());
-        }
-        syn::visit::visit_expr_path(self, expr_path);
-    }
-
-    fn visit_pat_ident(&mut self, pat_ident: &'ast syn::PatIdent) {
-        self.locals.insert(&pat_ident.ident);
-        syn::visit::visit_pat_ident(self, pat_ident);
-    }
-
-    fn visit_block(&mut self, block: &'ast syn::Block) {
-        self.visit_block_stmts(&block.stmts);
         // syn::visit::visit_block(self, block);
     }
 

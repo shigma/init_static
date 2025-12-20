@@ -1,62 +1,148 @@
 #[allow(unused_imports)]
 use init_static_macro::init_static;
 #[rustfmt::skip]
-static V1: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static V1: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V1);
 #[rustfmt::skip]
-static V2: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static V2: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V2);
 #[rustfmt::skip]
-static V3: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static V3: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V3);
 #[rustfmt::skip]
-static V4: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static V4: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V4);
 #[rustfmt::skip]
-#[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
-#[linkme(crate = ::init_static::__private::linkme)]
-static INIT_STATIC_V1_V2_V3_V4: ::init_static::__private::Init = {
-    #[allow(non_snake_case)]
-    fn INIT_STATIC_V1_V2_V3_V4() -> std::pin::Pin<
-        Box<dyn Future<Output = Result<(), ::init_static::__private::anyhow::Error>>>,
-    > {
-        Box::pin(async {
-            ::init_static::InitStatic::init(&V1, N1);
-            ::init_static::InitStatic::init(&V2, "42".parse()?);
-            ::init_static::InitStatic::init(&V3, async { N1 }.await);
-            ::init_static::InitStatic::init(&V4, async { "42".parse() }.await?);
-            Ok(())
-        })
-    }
-    ::init_static::__private::Init {
-        init: INIT_STATIC_V1_V2_V3_V4,
-        names: &["V1", "V2", "V3", "V4"],
-        deps: &["N1"],
-    }
+const _: () = {
+    #[::init_static::__private::linkme::distributed_slice(
+        ::init_static::__private::INIT
+    )]
+    #[linkme(crate = ::init_static::__private::linkme)]
+    static INIT_V1: ::init_static::__private::Init = {
+        #[allow(non_snake_case)]
+        fn INIT_V1() -> ::init_static::__private::BoxFuture<
+            ::init_static::__private::anyhow::Result<()>,
+        > {
+            Box::pin(async {
+                ::init_static::InitStatic::init(&V1, N1);
+                Ok(())
+            })
+        }
+        #[allow(non_snake_case, clippy::needless_borrow)]
+        fn DEPS_V1() -> ::std::vec::Vec<
+            ::std::option::Option<&'static ::init_static::Symbol>,
+        > {
+            use ::init_static::__private::MaybeInitStatic;
+            ::std::vec![(& N1).__get_symbol()]
+        }
+        ::init_static::__private::Init {
+            symbol: ::init_static::InitStatic::symbol(&V1),
+            init: INIT_V1,
+            deps: DEPS_V1,
+        }
+    };
+    #[::init_static::__private::linkme::distributed_slice(
+        ::init_static::__private::INIT
+    )]
+    #[linkme(crate = ::init_static::__private::linkme)]
+    static INIT_V2: ::init_static::__private::Init = {
+        #[allow(non_snake_case)]
+        fn INIT_V2() -> ::init_static::__private::BoxFuture<
+            ::init_static::__private::anyhow::Result<()>,
+        > {
+            Box::pin(async {
+                ::init_static::InitStatic::init(&V2, "42".parse()?);
+                Ok(())
+            })
+        }
+        ::init_static::__private::Init {
+            symbol: ::init_static::InitStatic::symbol(&V2),
+            init: INIT_V2,
+            deps: ::std::vec::Vec::new,
+        }
+    };
+    #[::init_static::__private::linkme::distributed_slice(
+        ::init_static::__private::INIT
+    )]
+    #[linkme(crate = ::init_static::__private::linkme)]
+    static INIT_V3: ::init_static::__private::Init = {
+        #[allow(non_snake_case)]
+        fn INIT_V3() -> ::init_static::__private::BoxFuture<
+            ::init_static::__private::anyhow::Result<()>,
+        > {
+            Box::pin(async {
+                ::init_static::InitStatic::init(&V3, async { N1 }.await);
+                Ok(())
+            })
+        }
+        #[allow(non_snake_case, clippy::needless_borrow)]
+        fn DEPS_V3() -> ::std::vec::Vec<
+            ::std::option::Option<&'static ::init_static::Symbol>,
+        > {
+            use ::init_static::__private::MaybeInitStatic;
+            ::std::vec![(& N1).__get_symbol()]
+        }
+        ::init_static::__private::Init {
+            symbol: ::init_static::InitStatic::symbol(&V3),
+            init: INIT_V3,
+            deps: DEPS_V3,
+        }
+    };
+    #[::init_static::__private::linkme::distributed_slice(
+        ::init_static::__private::INIT
+    )]
+    #[linkme(crate = ::init_static::__private::linkme)]
+    static INIT_V4: ::init_static::__private::Init = {
+        #[allow(non_snake_case)]
+        fn INIT_V4() -> ::init_static::__private::BoxFuture<
+            ::init_static::__private::anyhow::Result<()>,
+        > {
+            Box::pin(async {
+                ::init_static::InitStatic::init(&V4, async { "42".parse() }.await?);
+                Ok(())
+            })
+        }
+        ::init_static::__private::Init {
+            symbol: ::init_static::InitStatic::symbol(&V4),
+            init: INIT_V4,
+            deps: ::std::vec::Vec::new,
+        }
+    };
 };
 #[rustfmt::skip]
 const N1: u32 = 42;
 #[rustfmt::skip]
-static V5: ::init_static::InitStatic<u32> = ::init_static::InitStatic::new();
+static V5: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V5);
 #[rustfmt::skip]
-#[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
-#[linkme(crate = ::init_static::__private::linkme)]
-static INIT_STATIC_V5: ::init_static::__private::Init = {
-    #[allow(non_snake_case)]
-    fn INIT_STATIC_V5() -> std::pin::Pin<
-        Box<dyn Future<Output = Result<(), ::init_static::__private::anyhow::Error>>>,
-    > {
-        Box::pin(async {
-            let x = 42;
-            ::init_static::InitStatic::init(
-                &V5,
-                {
-                    const N2: u32 = 42;
-                    *V1 + N1 + N2 + x
-                },
-            );
-            Ok(())
-        })
-    }
-    ::init_static::__private::Init {
-        init: INIT_STATIC_V5,
-        names: &["V5"],
-        deps: &["V1"],
-    }
+const _: () = {
+    #[::init_static::__private::linkme::distributed_slice(
+        ::init_static::__private::INIT
+    )]
+    #[linkme(crate = ::init_static::__private::linkme)]
+    static INIT_V5: ::init_static::__private::Init = {
+        #[allow(non_snake_case)]
+        fn INIT_V5() -> ::init_static::__private::BoxFuture<
+            ::init_static::__private::anyhow::Result<()>,
+        > {
+            Box::pin(async {
+                ::init_static::InitStatic::init(
+                    &V5,
+                    {
+                        let x = 42;
+                        const N2: u32 = 42;
+                        *V1 + N1 + N2 + x
+                    },
+                );
+                Ok(())
+            })
+        }
+        #[allow(non_snake_case, clippy::needless_borrow)]
+        fn DEPS_V5() -> ::std::vec::Vec<
+            ::std::option::Option<&'static ::init_static::Symbol>,
+        > {
+            use ::init_static::__private::MaybeInitStatic;
+            ::std::vec![(& N1).__get_symbol(), (& V1).__get_symbol()]
+        }
+        ::init_static::__private::Init {
+            symbol: ::init_static::InitStatic::symbol(&V5),
+            init: INIT_V5,
+            deps: DEPS_V5,
+        }
+    };
 };
