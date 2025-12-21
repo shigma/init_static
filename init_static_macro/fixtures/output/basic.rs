@@ -20,10 +20,17 @@ const _: () = {
             ::std::sync::LazyLock::force(&V1);
             Ok(())
         }
+        #[allow(non_snake_case, clippy::needless_borrow)]
+        fn DEPS_V1() -> ::std::vec::Vec<
+            ::std::option::Option<&'static ::init_static::Symbol>,
+        > {
+            use ::init_static::__private::MaybeInitStatic;
+            ::std::vec![(& N1).__get_symbol()]
+        }
         ::init_static::__private::Init {
             symbol: ::init_static::Symbol!(V1),
             init: ::init_static::__private::InitFn::Sync(INIT_V1),
-            deps: ::std::vec::Vec::new,
+            deps: DEPS_V1,
         }
     };
     #[::init_static::__private::linkme::distributed_slice(

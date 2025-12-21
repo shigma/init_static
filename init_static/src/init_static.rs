@@ -6,16 +6,17 @@ use std::sync::OnceLock;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Symbol {
-    pub module: &'static str,
+    pub file: &'static str,
     pub line: u32,
     pub column: u32,
+    pub module: &'static str,
     pub ident: &'static str,
 }
 
 impl Display for Symbol {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (at {}:{}:{})", self.ident, self.module, self.line, self.column)
+        write!(f, "{} (at {}:{}:{})", self.ident, self.file, self.line, self.column)
     }
 }
 
@@ -23,9 +24,10 @@ impl Display for Symbol {
 macro_rules! Symbol {
     ($ident:ident) => {
         &$crate::Symbol {
-            module: module_path!(),
+            file: file!(),
             line: line!(),
             column: column!(),
+            module: module_path!(),
             ident: stringify!($ident),
         }
     };

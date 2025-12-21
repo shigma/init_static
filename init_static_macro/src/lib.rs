@@ -83,7 +83,6 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let item_expr = &item_static.expr;
         let span = item_ident.span();
         let (static_ty, static_expr, init_stmt, init_symbol) = if !is_try && !is_async {
-            free_paths.clear();
             (
                 quote_spanned! { span => ::std::sync::LazyLock<#item_ty> },
                 quote_spanned! { span => ::std::sync::LazyLock::new(|| #item_expr) },
