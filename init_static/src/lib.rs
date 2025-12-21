@@ -6,22 +6,88 @@ use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
-pub use init_static_macro::init_static;
 
 use crate::__private::{INIT, InitFn};
 pub use crate::init_static::{InitStatic, Symbol};
 
 mod init_static;
 
+/// Macro to declare statically stored values with explicit initialization. Similar to
+/// [`lazy_static!`](lazy_static::lazy_static!), but initialization is not automatic.
+///
+/// Each static declared using this macro:
+///
+/// - Wraps the value type in [`InitStatic`](struct@InitStatic)
+/// - Generates an init function that sets the value
+/// - Registers the init function in a distributed slice
+///
+/// The values are initialized when [`init_static()`] is called.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// init_static! {
+///     static VALUE: u32 = "42".parse()?;
+/// }
+///
+/// #[tokio::main]
+/// async fn main() {
+///     init_static().await.unwrap();
+///     println!("{}", *VALUE);
+/// }
+/// ```
+pub use init_static_macro::init_static;
+
 struct InitOptionsInner {
     debug: bool,
 }
 
+/// Global configuration options for the [`init_static()`] initialization process.
+///
+/// This struct provides a thread-safe way to configure initialization behavior
+/// before [`init_static()`] is called. Options must be set before initialization;
+/// attempting to modify them afterward will panic.
+///
+/// # Available Options
+///
+/// - **debug**: When enabled, prints initialization progress to stderr, showing which statics are
+///   being initialized and whether they are sync or async.
+///
+/// # Example
+///
+/// ```
+/// use init_static::{init_static, INIT_OPTIONS};
+///
+/// init_static! {
+///     static VALUE: u32 = 42;
+/// }
+///
+/// #[tokio::main]
+/// async fn main() {
+///     // Enable debug output before initialization
+///     INIT_OPTIONS.debug(true);
+///
+///     // Now initialize - this will print progress to stderr
+///     init_static().await.unwrap();
+/// }
+/// ```
 pub struct InitOptions {
     inner: Mutex<Option<InitOptionsInner>>,
 }
 
 impl InitOptions {
+    /// Enables or disables debug output during initialization.
+    ///
+    /// When debug mode is enabled, the initialization process prints messages
+    /// to stderr indicating:
+    ///
+    /// - When each synchronous static is initialized
+    /// - When each asynchronous static begins and completes initialization
+    ///
+    /// This is useful for diagnosing initialization order issues or performance
+    /// problems during startup.
     pub fn debug(&self, debug: bool) {
         self.inner
             .lock()
@@ -31,7 +97,19 @@ impl InitOptions {
             .debug = debug;
     }
 }
-
+/// Global configuration instance for [`init_static()`] initialization.
+///
+/// Use this static to configure initialization behavior before calling
+/// [`init_static()`]. See [`InitOptions`] for available configuration methods.
+///
+/// # Example
+///
+/// ```
+/// use init_static::INIT_OPTIONS;
+///
+/// // Configure before initialization
+/// INIT_OPTIONS.debug(true);
+/// ```
 pub static INIT_OPTIONS: InitOptions = InitOptions {
     inner: Mutex::new(Some(InitOptionsInner { debug: false })),
 };
@@ -40,7 +118,7 @@ pub static INIT_OPTIONS: InitOptions = InitOptions {
 ///
 /// This function iterates over all init functions registered via the macro and executes them once.
 /// Call this early in your program (e.g., at the beginning of `main()`) before accessing any
-/// [`InitStatic`] values.
+/// [`struct@InitStatic`] values.
 ///
 /// # Examples
 ///
@@ -132,10 +210,30 @@ pub async fn init_static() -> Result<(), InitError> {
     Ok(())
 }
 
+/// Error type returned by [`init_static()`] when initialization fails.
+///
+/// This enum represents the various failure modes that can occur during the static initialization
+/// process.
 #[derive(Debug)]
 pub enum InitError {
+    /// A static symbol was defined multiple times.
+    ///
+    /// This typically occurs when the same [`init_static!`] block is included multiple times, or
+    /// when two statics in different modules have the exact same source location metadata (which
+    /// should not happen in normal usage).
     Ambiguous { symbol: &'static Symbol },
+
+    /// A circular dependency was detected among statics.
+    ///
+    /// This occurs when static A depends on static B, and static B (directly or indirectly) depends
+    /// on static A. The initialization system cannot determine a valid order to initialize such
+    /// statics.
     Circular { symbols: Vec<&'static Symbol> },
+
+    /// An initialization expression returned an error.
+    ///
+    /// This wraps any [`anyhow::Error`] returned by a static's initialization expression. The
+    /// original error is preserved and can be accessed via the [`Error::source`] method.
     Execution(anyhow::Error),
 }
 

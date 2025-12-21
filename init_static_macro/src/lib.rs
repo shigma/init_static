@@ -6,32 +6,6 @@ use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::visit::Visit;
 
-/// Macro to declare statically stored values with explicit initialization. Similar to
-/// [`lazy_static!`](lazy_static::lazy_static), but initialization is not automatic.
-///
-/// Each static declared using this macro:
-///
-/// - Wraps the value type in [`InitStatic`](init_static::InitStatic)
-/// - Generates an init function that sets the value
-/// - Registers the init function in a distributed slice
-///
-/// The values are initialized when [`init_static`](init_static::init_static) is called.
-///
-/// # Example
-///
-/// ```
-/// use init_static::init_static;
-///
-/// init_static! {
-///     static VALUE: u32 = "42".parse()?;
-/// }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     init_static().await.unwrap();
-///     println!("{}", *VALUE);
-/// }
-/// ```
 #[proc_macro]
 pub fn init_static(input: TokenStream) -> TokenStream {
     init_static_inner(input.into()).into()
