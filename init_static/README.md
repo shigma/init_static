@@ -28,23 +28,21 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-init_static = { version = "0.1" }
+init_static = { version = "0.4" }
 ```
 
 # Example
 
 ```rust
 use init_static::init_static;
-use std::error::Error;
 
 init_static! {
     static VALUE: u32 = "42".parse()?;
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    init_static().await?;
+async fn main() {
+    init_static().await.unwrap();
     println!("{}", *VALUE);
-    Ok(())
 }
 ```

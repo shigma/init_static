@@ -46,17 +46,15 @@ pub static INIT_OPTIONS: InitOptions = InitOptions {
 ///
 /// ```
 /// use init_static::init_static;
-/// use std::error::Error;
 ///
 /// init_static! {
 ///     static VALUE: u32 = "42".parse()?;
 /// }
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn Error>> {
-///     init_static().await?;
+/// async fn main() {
+///     init_static().await.unwrap();
 ///     println!("{}", *VALUE);
-///     Ok(())
 /// }
 /// ```
 pub async fn init_static() -> Result<(), InitError> {

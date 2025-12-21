@@ -21,17 +21,15 @@ use syn::visit::Visit;
 ///
 /// ```
 /// use init_static::init_static;
-/// use std::error::Error;
 ///
 /// init_static! {
 ///     static VALUE: u32 = "42".parse()?;
 /// }
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn Error>> {
-///     init_static().await?;
+/// async fn main() {
+///     init_static().await.unwrap();
 ///     println!("{}", *VALUE);
-///     Ok(())
 /// }
 /// ```
 #[proc_macro]

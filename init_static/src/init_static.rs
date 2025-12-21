@@ -4,12 +4,39 @@ use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 
+/// Represents the source location and identity of a static variable declared via
+/// [`init_static!`](crate::init_static).
+///
+/// This struct captures compile-time metadata about where a static was defined,
+/// enabling meaningful error messages and debugging output during initialization.
+///
+/// # Example
+///
+/// ```
+/// use init_static::Symbol;
+///
+/// let symbol: &Symbol = Symbol!(MY_VALUE);
+/// println!("{symbol}"); // MY_VALUE (at src/main.rs:10:1)
+/// ```
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Symbol {
+    /// The source file path where this static is declared.
+    ///
+    /// See also: [`file!`](file)
     pub file: &'static str,
+    /// The line number of the declaration.
+    ///
+    /// See also: [`line!`](line)
     pub line: u32,
+    /// The column number of the declaration.
+    ///
+    /// See also: [`column!`](column)
     pub column: u32,
+    /// The full module path containing this static.
+    ///
+    /// See also: [`module_path!`](module_path)
     pub module: &'static str,
+    /// The identifier name of the static variable.
     pub ident: &'static str,
 }
 
@@ -20,6 +47,27 @@ impl Display for Symbol {
     }
 }
 
+/// Creates a [`Symbol`] reference capturing the current source location for the given identifier.
+///
+/// This macro is primarily used internally by [`init_static!`](crate::init_static) to record
+/// metadata about each declared static variable. It captures compile-time information using
+/// the standard location macros ([`file!`](file), [`line!`](line), [`column!`](column) and
+/// [`module_path!`](module_path)).
+///
+/// # Example
+///
+/// ```
+/// use init_static::{Symbol};
+///
+/// let symbol: &Symbol = Symbol!(MY_VALUE);
+/// assert_eq!(symbol.ident, "MY_VALUE");
+/// assert!(symbol.file.ends_with(".rs"));
+/// ```
+///
+/// # Note
+///
+/// This macro returns a [`&'static Symbol`](Symbol) reference, which is suitable for use in
+/// static contexts and error reporting.
 #[macro_export]
 macro_rules! Symbol {
     ($ident:ident) => {
@@ -33,6 +81,23 @@ macro_rules! Symbol {
     };
 }
 
+/// Creates a new uninitialized [`InitStatic<T>`] instance with source location metadata.
+///
+/// This macro is a convenience wrapper around [`InitStatic::new`] that automatically
+/// captures the source location using the [`Symbol!`] macro.
+///
+/// # Example
+///
+/// ```
+/// use init_static::InitStatic;
+///
+/// struct Config; // Placeholder for some configuration type
+///
+/// static MY_CONFIG: InitStatic<Config> = InitStatic!(MY_CONFIG);
+///
+/// // The static is uninitialized and will panic if accessed before initialization.
+/// // Use `InitStatic::init(&MY_CONFIG, value)` to initialize it.
+/// ```
 #[macro_export]
 macro_rules! InitStatic {
     ($ident:ident) => {
@@ -41,7 +106,7 @@ macro_rules! InitStatic {
 }
 
 /// A wrapper around [`OnceLock`] providing safe initialization and [`Deref`] support to mimic the
-/// ergonomics of `lazy_static!`.
+/// ergonomics of [`lazy_static!`](lazy_static::lazy_static).
 ///
 /// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
 /// [`init_static`](crate::init_static). Accessing an uninitialized value will panic.
@@ -73,6 +138,10 @@ impl<T> InitStatic<T> {
             .unwrap_or_else(|_| panic!("Double initialization of init_static: {}", this.symbol));
     }
 
+    /// Returns the [`Symbol`] associated with this static, containing source location metadata.
+    ///
+    /// This method provides access to compile-time information about where the static was
+    /// declared, which is useful for debugging, logging, and error reporting.
     #[inline]
     pub const fn symbol(this: &Self) -> &'static Symbol {
         this.symbol
