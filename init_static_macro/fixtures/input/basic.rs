@@ -10,10 +10,10 @@ init_static! {
 #[rustfmt::skip]
 init_static! {
     const N1: u32 = 42;
-    static V5: u32 = async {
+    static V5: u32 = {
         #[expect(non_snake_case)]
         let X = 42;
         const N2: u32 = 42;
         *V1 + N1 + N2 + X
-    }.await;
+    };
 }

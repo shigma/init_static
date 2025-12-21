@@ -4,6 +4,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream, Parser};
+use syn::spanned::Spanned;
 use syn::visit::Visit;
 
 #[proc_macro]
@@ -53,30 +54,23 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let item_mut = &item_static.mutability;
         let item_ty = &item_static.ty;
         let item_expr = &item_static.expr;
-        let span = item_ident.span();
-        let (static_ty, static_expr, init_stmt, init_symbol) = if !is_try && !is_async {
-            (
-                quote_spanned! { span => ::std::sync::LazyLock<#item_ty> },
-                quote_spanned! { span => ::std::sync::LazyLock::new(|| #item_expr) },
-                quote! { ::std::sync::LazyLock::force(&#item_ident); },
-                quote! { ::init_static::Symbol!(#item_ident) },
-            )
-        } else {
-            (
-                quote_spanned! { span => ::init_static::InitStatic<#item_ty> },
-                quote_spanned! { span => ::init_static::InitStatic!(#item_ident) },
-                quote! { ::init_static::InitStatic::init(&#item_ident, #item_expr); },
-                quote! { ::init_static::InitStatic::symbol(&#item_ident) },
-            )
+        let ty_span = item_ty.span();
+        let ident_span = item_ident.span();
+        let static_ty = quote_spanned! { ty_span =>
+            ::init_static::InitStatic<#item_ty>
+        };
+        let static_expr = quote_spanned! { ident_span =>
+            ::init_static::InitStatic!(#item_ident)
         };
         output.extend(quote! {
+            #[allow(clippy::type_complexity)]
             #item_vis static #item_mut #item_ident: #static_ty = #static_expr;
         });
 
         let (deps_ident, deps_item) = if free_paths.is_empty() {
             (quote! { ::std::vec::Vec::new }, quote! {})
         } else {
-            let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), span);
+            let deps_ident = syn::Ident::new(&format!("DEPS_{item_ident}"), ident_span);
             let deps_stmts = free_paths.iter().map(|path| {
                 let path = &path.path;
                 quote! {
@@ -103,7 +97,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                     #[allow(non_snake_case)]
                     fn #init_ident() -> ::init_static::__private::BoxFuture<::init_static::__private::anyhow::Result<()>> {
                         Box::pin(async {
-                            #init_stmt
+                            ::init_static::InitStatic::init(&#item_ident, #item_expr);
                             Ok(())
                         })
                     }
@@ -115,7 +109,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 quote! {
                     #[allow(non_snake_case)]
                     fn #init_ident() -> ::init_static::__private::anyhow::Result<()> {
-                        #init_stmt
+                        ::init_static::InitStatic::init(&#item_ident, #item_expr);
                         Ok(())
                     }
                 },
@@ -128,7 +122,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 #init_item
                 #deps_item
                 ::init_static::__private::Init {
-                    symbol: #init_symbol,
+                    symbol: ::init_static::InitStatic::symbol(&#item_ident),
                     init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
                 }
