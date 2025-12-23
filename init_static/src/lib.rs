@@ -40,79 +40,39 @@ mod init_static;
 /// ```
 pub use init_static_macro::init_static;
 
-struct InitOptionsInner {
+struct InitOptions {
     debug: bool,
 }
 
-/// Global configuration options for the [`init_static()`] initialization process.
+static INIT_OPTIONS: Mutex<Option<InitOptions>> = Mutex::new(Some(InitOptions { debug: false }));
+
+/// Enables or disables debug output during initialization.
 ///
-/// This struct provides a thread-safe way to configure initialization behavior
-/// before [`init_static()`] is called. Options must be set before initialization;
-/// attempting to modify them afterward will panic.
+/// When debug mode is enabled, the initialization process prints messages
+/// to stderr indicating:
 ///
-/// # Available Options
+/// - When each synchronous static is initialized
+/// - When each asynchronous static begins and completes initialization
 ///
-/// - **debug**: When enabled, prints initialization progress to stderr, showing which statics are
-///   being initialized and whether they are sync or async.
-///
-/// # Example
-///
-/// ```
-/// use init_static::{init_static, INIT_OPTIONS};
-///
-/// init_static! {
-///     static VALUE: u32 = 42;
-/// }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     // Enable debug output before initialization
-///     INIT_OPTIONS.debug(true);
-///
-///     // Now initialize - this will print progress to stderr
-///     init_static().await.unwrap();
-/// }
-/// ```
-pub struct InitOptions {
-    inner: Mutex<Option<InitOptionsInner>>,
+/// This is useful for diagnosing initialization order issues or performance
+/// problems during startup.
+pub fn set_debug(debug: bool) {
+    INIT_OPTIONS
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("INIT_OPTIONS can only be modified before `init_static` is called.")
+        .debug = debug;
 }
 
-impl InitOptions {
-    /// Enables or disables debug output during initialization.
-    ///
-    /// When debug mode is enabled, the initialization process prints messages
-    /// to stderr indicating:
-    ///
-    /// - When each synchronous static is initialized
-    /// - When each asynchronous static begins and completes initialization
-    ///
-    /// This is useful for diagnosing initialization order issues or performance
-    /// problems during startup.
-    pub fn debug(&self, debug: bool) {
-        self.inner
-            .lock()
-            .unwrap()
-            .as_mut()
-            .expect("INIT_OPTIONS can only be modified before `init_static` is called.")
-            .debug = debug;
-    }
+/// Returns whether [`init_static()`] has already been called.
+///
+/// This function checks if the initialization process has been executed. It returns `true` if
+/// [`init_static()`] has been called (regardless of whether it succeeded or failed), and `false`
+/// otherwise.
+pub fn is_initialized() -> bool {
+    INIT_OPTIONS.lock().unwrap().is_none()
 }
-/// Global configuration instance for [`init_static()`] initialization.
-///
-/// Use this static to configure initialization behavior before calling
-/// [`init_static()`]. See [`InitOptions`] for available configuration methods.
-///
-/// # Example
-///
-/// ```
-/// use init_static::INIT_OPTIONS;
-///
-/// // Configure before initialization
-/// INIT_OPTIONS.debug(true);
-/// ```
-pub static INIT_OPTIONS: InitOptions = InitOptions {
-    inner: Mutex::new(Some(InitOptionsInner { debug: false })),
-};
 
 /// Runs initialization for all statics declared with [`init_static!`].
 ///
@@ -137,7 +97,6 @@ pub static INIT_OPTIONS: InitOptions = InitOptions {
 /// ```
 pub async fn init_static() -> Result<(), InitError> {
     let options = INIT_OPTIONS
-        .inner
         .lock()
         .unwrap()
         .take()
