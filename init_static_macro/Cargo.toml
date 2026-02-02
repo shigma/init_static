@@ -18,15 +18,15 @@ name = "input"
 path = "fixtures/mod.rs"
 
 [dependencies]
-proc-macro2 = "1.0.103"
-quote = "1.0.41"
-syn = { version = "2.0.108", features = ["full", "visit"] }
+proc-macro2 = "1.0.106"
+quote = "1.0.44"
+syn = { version = "2.0.114", features = ["full", "visit"] }
 
 [dev-dependencies]
 init_static = { path = "../init_static" }
 macro_expand = "0.1.2"
 pretty_assertions = "1.4.1"
 prettyplease = "0.2.37"
-tokio = { version = "1.48.0", features = ["full"] }
-trybuild = "1.0.113"
+tokio = { version = "1.49.0", features = ["full"] }
+trybuild = "1.0.115"
 walkdir = "2.5.0"
