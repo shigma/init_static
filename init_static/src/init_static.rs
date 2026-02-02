@@ -135,7 +135,7 @@ impl<T> InitStatic<T> {
     pub fn init(this: &Self, value: T) {
         this.inner
             .set(value)
-            .unwrap_or_else(|_| panic!("Double initialization of init_static: {}", this.symbol));
+            .unwrap_or_else(|_| panic!("double initialization of init_static: {}", this.symbol));
     }
 
     /// Returns the [`Symbol`] associated with this static, containing source location metadata.
@@ -155,7 +155,7 @@ impl<T> Deref for InitStatic<T> {
     fn deref(&self) -> &Self::Target {
         self.inner
             .get()
-            .unwrap_or_else(|| panic!("Access to uninitialized init_static: {}", self.symbol))
+            .unwrap_or_else(|| panic!("access to uninitialized init_static: {}", self.symbol))
     }
 }
 
@@ -164,7 +164,7 @@ impl<T> DerefMut for InitStatic<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
             .get_mut()
-            .unwrap_or_else(|| panic!("Access to uninitialized init_static: {}", self.symbol))
+            .unwrap_or_else(|| panic!("access to uninitialized init_static: {}", self.symbol))
     }
 }
 
