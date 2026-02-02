@@ -1,16 +1,15 @@
-#[doc = include_str!("../README.md")]
+#![doc = include_str!("../README.md")]
+
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
-use std::fmt::{Debug, Display};
 use std::sync::Mutex;
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 
 use crate::__private::{INIT, InitFn};
-pub use crate::init_static::{InitStatic, Symbol};
 
+mod error;
 mod init_static;
 
 /// Macro to declare statically stored values with explicit initialization. Similar to
@@ -40,6 +39,9 @@ mod init_static;
 /// }
 /// ```
 pub use init_static_macro::init_static;
+
+pub use crate::error::InitError;
+pub use crate::init_static::{InitStatic, Symbol};
 
 struct InitOptions {
     debug: bool,
@@ -96,7 +98,7 @@ pub fn is_initialized() -> bool {
 ///     println!("{}", *VALUE);
 /// }
 /// ```
-pub async fn init_static() -> Result<(), InitError> {
+pub async fn init_static() -> Result<()> {
     let options = INIT_OPTIONS
         .lock()
         .unwrap()
@@ -106,7 +108,7 @@ pub async fn init_static() -> Result<(), InitError> {
     let mut symbol_map: HashMap<&'static Symbol, usize> = HashMap::new();
     for (i, init) in INIT.iter().enumerate() {
         if symbol_map.insert(init.symbol, i).is_some() {
-            return Err(InitError::Ambiguous { symbol: init.symbol });
+            return Err(InitError::Ambiguous { symbol: init.symbol }.into());
         }
     }
 
@@ -162,7 +164,8 @@ pub async fn init_static() -> Result<(), InitError> {
         if join_set.is_empty() {
             return Err(InitError::Circular {
                 symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
-            });
+            }
+            .into());
         }
         let i = join_set.next().await.unwrap()?;
         for (_, deps) in &mut adjacent {
@@ -171,67 +174,6 @@ pub async fn init_static() -> Result<(), InitError> {
     }
 
     Ok(())
-}
-
-/// Error type returned by [`init_static()`] when initialization fails.
-///
-/// This enum represents the various failure modes that can occur during the static initialization
-/// process.
-#[derive(Debug)]
-pub enum InitError {
-    /// A static symbol was defined multiple times.
-    ///
-    /// This typically occurs when the same [`init_static!`] block is included multiple times, or
-    /// when two statics in different modules have the exact same source location metadata (which
-    /// should not happen in normal usage).
-    Ambiguous { symbol: &'static Symbol },
-
-    /// A circular dependency was detected among statics.
-    ///
-    /// This occurs when static A depends on static B, and static B (directly or indirectly) depends
-    /// on static A. The initialization system cannot determine a valid order to initialize such
-    /// statics.
-    Circular { symbols: Vec<&'static Symbol> },
-
-    /// An initialization expression returned an error.
-    ///
-    /// This wraps any [`anyhow::Error`] returned by a static's initialization expression. The
-    /// original error is preserved and can be accessed via the [`Error::source`] method.
-    Execution(anyhow::Error),
-}
-
-impl From<anyhow::Error> for InitError {
-    #[inline]
-    fn from(e: anyhow::Error) -> Self {
-        Self::Execution(e)
-    }
-}
-
-impl Display for InitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Ambiguous { symbol } => {
-                write!(f, "Symbol {symbol} is defined multiple times.")
-            }
-            Self::Circular { symbols } => {
-                writeln!(f, "Circular dependency detected among:")?;
-                for symbol in symbols {
-                    writeln!(f, "    {symbol}")?;
-                }
-                Ok(())
-            }
-            Self::Execution(e) => Display::fmt(e, f),
-        }
-    }
-}
-
-impl Error for InitError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Execution(e) => Some(&**e),
-            _ => None,
-        }
-    }
 }
 
 #[doc(hidden)]
