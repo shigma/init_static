@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::sync::Mutex;
 
+use anyhow::Context;
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 
@@ -135,7 +136,7 @@ pub async fn init_static() -> Result<(), InitError> {
                     if options.debug {
                         eprintln!("init_static: sync {}", INIT[i].symbol);
                     }
-                    f()?;
+                    f().with_context(|| format!("failed to initialize {}", INIT[i].symbol))?;
                     for (_, deps) in &mut adjacent {
                         deps.remove(&i);
                     }
@@ -144,11 +145,14 @@ pub async fn init_static() -> Result<(), InitError> {
                     if options.debug {
                         eprintln!("init_static: async begin {}", INIT[i].symbol);
                     }
-                    let output = f().await;
+                    let output = f()
+                        .await
+                        .map(|_| i)
+                        .with_context(|| format!("failed to initialize {}", INIT[i].symbol));
                     if options.debug {
                         eprintln!("init_static: async end {}", INIT[i].symbol);
                     }
-                    output.map(|_| i)
+                    output
                 }),
             }
         }
