@@ -159,9 +159,7 @@ async fn init_impl() -> anyhow::Result<()> {
             rdeps[k].push(i);
         }
     }
-    let mut queue = (0..INIT.len())
-        .filter(|&i| remaining[i] == 0)
-        .collect::<VecDeque<_>>();
+    let mut queue = (0..INIT.len()).filter(|&i| remaining[i] == 0).collect::<VecDeque<_>>();
     let mut order = Vec::with_capacity(INIT.len());
     while let Some(k) = queue.pop_front() {
         order.push(k);
@@ -263,6 +261,12 @@ pub mod __private {
         pub symbol: &'static Symbol,
         pub init: InitFn,
         pub deps: fn() -> Vec<Option<&'static Symbol>>,
+        /// Initialization priority declared via `#[priority = N]` (default `0`).
+        ///
+        /// Statics are initialized in descending priority order: higher values run first, negative
+        /// values run after the default tier. Real dependencies always take precedence — a
+        /// dependency inherits the highest priority among the nodes that depend on it, so it is
+        /// never scheduled later than its dependents.
         pub priority: i32,
     }
 

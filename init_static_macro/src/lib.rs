@@ -23,26 +23,44 @@ fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
     parser.parse2(tokens)
 }
 
-fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<i32> {
+fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<(i32, syn::Ident)> {
     let mut priority = 0;
+    // Field name used on the left of `priority: #priority`. When the user writes
+    // `#[priority = N]`, reuse that `priority` ident so the generated field inherits
+    // its span, letting editors highlight / link the attribute to the struct field.
+    let mut field = syn::Ident::new("priority", proc_macro2::Span::call_site());
     for attr in attrs {
         if !attr.path().is_ident("priority") {
             continue;
         }
+        if let Some(ident) = attr.path().get_ident() {
+            field = ident.clone();
+        }
         let value = &attr.meta.require_name_value()?.value;
-        let err = || syn::Error::new(value.span(), "expected an integer literal for `priority`");
+        let make_error = || syn::Error::new(value.span(), "expected an integer literal for `priority`");
         priority = match value {
-            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit), .. }) => lit.base10_parse::<i32>()?,
-            syn::Expr::Unary(syn::ExprUnary { op: syn::UnOp::Neg(_), expr, .. }) => {
-                let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit), .. }) = &**expr else {
-                    return Err(err());
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Int(lit),
+                ..
+            }) => lit.base10_parse::<i32>()?,
+            syn::Expr::Unary(syn::ExprUnary {
+                op: syn::UnOp::Neg(_),
+                expr,
+                ..
+            }) => {
+                let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(lit),
+                    ..
+                }) = &**expr
+                else {
+                    return Err(make_error());
                 };
                 -lit.base10_parse::<i32>()?
             }
-            _ => return Err(err()),
+            _ => return Err(make_error()),
         };
     }
-    Ok(priority)
+    Ok((priority, field))
 }
 
 pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
@@ -68,8 +86,8 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
-        let priority = match parse_priority(&item_static.attrs) {
-            Ok(priority) => priority,
+        let (priority, priority_field) = match parse_priority(&item_static.attrs) {
+            Ok(result) => result,
             Err(err) => {
                 output.extend(err.to_compile_error());
                 continue;
@@ -163,7 +181,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                     symbol: ::init_static::InitStatic::symbol(&#item_ident),
                     init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
-                    priority: #priority,
+                    #priority_field: #priority,
                 }
             };
         });
