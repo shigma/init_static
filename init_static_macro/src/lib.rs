@@ -23,6 +23,28 @@ fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
     parser.parse2(tokens)
 }
 
+fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<i32> {
+    let mut priority = 0;
+    for attr in attrs {
+        if !attr.path().is_ident("priority") {
+            continue;
+        }
+        let value = &attr.meta.require_name_value()?.value;
+        let err = || syn::Error::new(value.span(), "expected an integer literal for `priority`");
+        priority = match value {
+            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit), .. }) => lit.base10_parse::<i32>()?,
+            syn::Expr::Unary(syn::ExprUnary { op: syn::UnOp::Neg(_), expr, .. }) => {
+                let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit), .. }) = &**expr else {
+                    return Err(err());
+                };
+                -lit.base10_parse::<i32>()?
+            }
+            _ => return Err(err()),
+        };
+    }
+    Ok(priority)
+}
+
 pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
     let input_stmts = match parse_repeated::<syn::Stmt>(input) {
         Ok(items) => items,
@@ -44,6 +66,14 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let syn::Item::Static(item_static) = item else {
             output.extend(quote! { #item });
             continue;
+        };
+
+        let priority = match parse_priority(&item_static.attrs) {
+            Ok(priority) => priority,
+            Err(err) => {
+                output.extend(err.to_compile_error());
+                continue;
+            }
         };
 
         let mut is_try = false;
@@ -133,6 +163,7 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                     symbol: ::init_static::InitStatic::symbol(&#item_ident),
                     init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
+                    priority: #priority,
                 }
             };
         });

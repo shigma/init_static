@@ -10,8 +10,8 @@ async fn main() {
     let e = init_static().await.unwrap_err();
     let expected = concat!(
         "Circular dependency detected among:\n",
-        "    BAR (at init_static/tests/circular.rs:7:16)\n",
         "    FOO (at init_static/tests/circular.rs:6:16)\n",
+        "    BAR (at init_static/tests/circular.rs:7:16)\n",
     );
     assert_eq!(e.to_string(), expected);
 

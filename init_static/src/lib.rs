@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Context;
@@ -134,64 +134,108 @@ async fn init_impl() -> anyhow::Result<()> {
         }
     }
 
-    let mut adjacent = INIT
+    let deps = INIT
         .iter()
-        .enumerate()
-        .map(|(i, init)| {
-            let deps = (init.deps)()
+        .map(|init| {
+            (init.deps)()
                 .into_iter()
                 .filter_map(|symbol| Some(*symbol_map.get(symbol?)?))
-                .collect::<HashSet<_>>();
-            (i, deps)
+                .collect::<HashSet<_>>()
         })
         .collect::<Vec<_>>();
 
+    // Effective priority: a node inherits the highest priority among all nodes that
+    // (transitively) depend on it, so a dependency's tier is never lower than its
+    // dependent's. Propagate in reverse topological order (dependents before their
+    // dependencies) so a single O(V + E) pass suffices. Nodes in a dependency cycle
+    // are absent from `order` and keep their declared priority; the cycle is reported
+    // later during execution.
+    let mut eff = INIT.iter().map(|init| init.priority).collect::<Vec<_>>();
+    let mut rdeps = vec![Vec::new(); INIT.len()];
+    let mut remaining = vec![0usize; INIT.len()];
+    for (i, deps) in deps.iter().enumerate() {
+        remaining[i] = deps.len();
+        for &k in deps {
+            rdeps[k].push(i);
+        }
+    }
+    let mut queue = (0..INIT.len())
+        .filter(|&i| remaining[i] == 0)
+        .collect::<VecDeque<_>>();
+    let mut order = Vec::with_capacity(INIT.len());
+    while let Some(k) = queue.pop_front() {
+        order.push(k);
+        for &i in &rdeps[k] {
+            remaining[i] -= 1;
+            if remaining[i] == 0 {
+                queue.push_back(i);
+            }
+        }
+    }
+    for &i in order.iter().rev() {
+        for &k in &deps[i] {
+            eff[k] = eff[k].max(eff[i]);
+        }
+    }
+
+    // Process tiers by descending effective priority; each distinct value is a tier,
+    // and a tier fully completes before the next one starts (hard barrier).
+    let tiers = eff.iter().copied().collect::<BTreeSet<_>>();
+
     let mut join_set = FuturesUnordered::new();
-    while !adjacent.is_empty() || !join_set.is_empty() {
-        let layer = adjacent
-            .extract_if(.., |(_, deps)| deps.is_empty())
-            .map(|(i, _)| i)
-            .collect::<HashSet<_>>();
-        let mut has_sync = false;
-        for i in layer {
-            match &INIT[i].init {
-                InitFn::Sync(f) => {
-                    has_sync = true;
-                    if debug {
-                        eprintln!("init_static: sync {}", INIT[i].symbol);
+    for tier in tiers.into_iter().rev() {
+        let members = (0..INIT.len()).filter(|&i| eff[i] == tier).collect::<HashSet<_>>();
+        // Dependencies outside this tier belong to higher tiers and are already done.
+        let mut adjacent = members
+            .iter()
+            .map(|&i| (i, deps[i].intersection(&members).copied().collect::<HashSet<_>>()))
+            .collect::<Vec<_>>();
+
+        while !adjacent.is_empty() || !join_set.is_empty() {
+            let layer = adjacent
+                .extract_if(.., |(_, deps)| deps.is_empty())
+                .map(|(i, _)| i)
+                .collect::<HashSet<_>>();
+            let mut has_sync = false;
+            for i in layer {
+                match &INIT[i].init {
+                    InitFn::Sync(f) => {
+                        has_sync = true;
+                        if debug {
+                            eprintln!("init_static: sync {}", INIT[i].symbol);
+                        }
+                        f().with_context(|| format!("failed to initialize {}", INIT[i].symbol))?;
+                        for (_, deps) in &mut adjacent {
+                            deps.remove(&i);
+                        }
                     }
-                    f().with_context(|| format!("failed to initialize {}", INIT[i].symbol))?;
-                    for (_, deps) in &mut adjacent {
-                        deps.remove(&i);
-                    }
+                    InitFn::Async(f) => join_set.push(async move {
+                        if debug {
+                            eprintln!("init_static: async begin {}", INIT[i].symbol);
+                        }
+                        let output = f()
+                            .await
+                            .map(|_| i)
+                            .with_context(|| format!("failed to initialize {}", INIT[i].symbol));
+                        if debug {
+                            eprintln!("init_static: async end {}", INIT[i].symbol);
+                        }
+                        output
+                    }),
                 }
-                InitFn::Async(f) => join_set.push(async move {
-                    if debug {
-                        eprintln!("init_static: async begin {}", INIT[i].symbol);
-                    }
-                    let output = f()
-                        .await
-                        .map(|_| i)
-                        .with_context(|| format!("failed to initialize {}", INIT[i].symbol));
-                    if debug {
-                        eprintln!("init_static: async end {}", INIT[i].symbol);
-                    }
-                    output
-                }),
             }
-        }
-        if has_sync {
-            continue;
-        }
-        if join_set.is_empty() {
-            return Err(InitError::Circular {
-                symbols: adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect(),
+            if has_sync {
+                continue;
             }
-            .into());
-        }
-        let i = join_set.next().await.unwrap()?;
-        for (_, deps) in &mut adjacent {
-            deps.remove(&i);
+            if join_set.is_empty() {
+                let mut symbols = adjacent.iter().map(|(i, _)| INIT[*i].symbol).collect::<Vec<_>>();
+                symbols.sort_unstable_by_key(|s| (s.file, s.line, s.column));
+                return Err(InitError::Circular { symbols }.into());
+            }
+            let i = join_set.next().await.unwrap()?;
+            for (_, deps) in &mut adjacent {
+                deps.remove(&i);
+            }
         }
     }
 
@@ -219,6 +263,7 @@ pub mod __private {
         pub symbol: &'static Symbol,
         pub init: InitFn,
         pub deps: fn() -> Vec<Option<&'static Symbol>>,
+        pub priority: i32,
     }
 
     #[linkme::distributed_slice]
