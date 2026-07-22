@@ -11,4 +11,7 @@ init_static! {
 #[tokio::test]
 async fn main() {
     init_static().await.unwrap();
+    // Calling again shares the same completed future.
+    init_static().await.unwrap();
+    assert_eq!(*FOO, 42);
 }

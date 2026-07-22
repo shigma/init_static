@@ -9,10 +9,10 @@ use crate::Symbol;
 ///
 /// Errors returned by initialization expressions (e.g., `"42".parse()?`) are **NOT**
 /// wrapped in this enum. Instead, [`init_static()`](crate::init_static()) returns
-/// [`anyhow::Result<()>`] directly, which preserves the original error's backtrace for better
-/// debugging.
+/// [`Arc<anyhow::Error>`](std::sync::Arc), which shares the original error (including its
+/// backtrace) across all callers of the shared initialization future.
 ///
-/// To distinguish between error types, use [`anyhow::Error::downcast`] or
+/// To distinguish between error types, deref the [`Arc`](std::sync::Arc) and use
 /// [`anyhow::Error::downcast_ref`].
 #[derive(Debug)]
 pub enum InitError {

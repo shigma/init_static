@@ -8,13 +8,14 @@ async fn main() {
     }
 
     let e = init_static().await.unwrap_err();
-    assert_eq!(
-        e.to_string(),
-        [
-            "Circular dependency detected among:\n",
-            "    BAR (at init_static/tests/circular.rs:7:16)\n",
-            "    FOO (at init_static/tests/circular.rs:6:16)\n"
-        ]
-        .join("")
+    let expected = concat!(
+        "Circular dependency detected among:\n",
+        "    BAR (at init_static/tests/circular.rs:7:16)\n",
+        "    FOO (at init_static/tests/circular.rs:6:16)\n",
     );
+    assert_eq!(e.to_string(), expected);
+
+    // The failure is cached and shared across calls.
+    let e2 = init_static().await.unwrap_err();
+    assert_eq!(e2.to_string(), expected);
 }

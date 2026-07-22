@@ -1,13 +1,14 @@
 #![doc = include_str!("../README.md")]
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use futures_util::StreamExt;
+use futures_util::future::{FutureExt, Shared};
 use futures_util::stream::FuturesUnordered;
 
-use crate::__private::{INIT, InitFn};
+use crate::__private::{BoxFuture, INIT, InitFn};
 
 mod error;
 mod init_static;
@@ -49,6 +50,10 @@ struct InitOptions {
 
 static INIT_OPTIONS: Mutex<Option<InitOptions>> = Mutex::new(Some(InitOptions { debug: false }));
 
+type SharedInit = Shared<BoxFuture<Result<(), Arc<anyhow::Error>>>>;
+
+static INIT_FUTURE: OnceLock<SharedInit> = OnceLock::new();
+
 /// Enables or disables debug output during initialization.
 ///
 /// When debug mode is enabled, the initialization process prints messages
@@ -83,6 +88,11 @@ pub fn is_initialized() -> bool {
 /// Call this early in your program (e.g., at the beginning of `main()`) before accessing any
 /// [`struct@InitStatic`] values.
 ///
+/// This function may be called multiple times. All callers share a single underlying future, so the
+/// initialization work runs exactly once; every call resolves to the same [`Arc`]-wrapped result.
+/// Because the shared result is cached, a failed initialization is *not* retried on subsequent
+/// calls.
+///
 /// # Examples
 ///
 /// ```
@@ -98,12 +108,24 @@ pub fn is_initialized() -> bool {
 ///     println!("{}", *VALUE);
 /// }
 /// ```
-pub async fn init_static() -> Result<()> {
-    let options = INIT_OPTIONS
+pub async fn init_static() -> std::result::Result<(), Arc<anyhow::Error>> {
+    INIT_FUTURE
+        .get_or_init(|| {
+            let fut: BoxFuture<_> = Box::pin(async { init_impl().await.map_err(Arc::new) });
+            fut.shared()
+        })
+        .clone()
+        .await
+}
+
+async fn init_impl() -> anyhow::Result<()> {
+    // The shared future drives this exactly once, so `take` never sees `None`.
+    let debug = INIT_OPTIONS
         .lock()
         .unwrap()
         .take()
-        .expect("`init_static` can only be called once.");
+        .expect("init_static ran more than once")
+        .debug;
 
     let mut symbol_map: HashMap<&'static Symbol, usize> = HashMap::new();
     for (i, init) in INIT.iter().enumerate() {
@@ -135,7 +157,7 @@ pub async fn init_static() -> Result<()> {
             match &INIT[i].init {
                 InitFn::Sync(f) => {
                     has_sync = true;
-                    if options.debug {
+                    if debug {
                         eprintln!("init_static: sync {}", INIT[i].symbol);
                     }
                     f().with_context(|| format!("failed to initialize {}", INIT[i].symbol))?;
@@ -144,14 +166,14 @@ pub async fn init_static() -> Result<()> {
                     }
                 }
                 InitFn::Async(f) => join_set.push(async move {
-                    if options.debug {
+                    if debug {
                         eprintln!("init_static: async begin {}", INIT[i].symbol);
                     }
                     let output = f()
                         .await
                         .map(|_| i)
                         .with_context(|| format!("failed to initialize {}", INIT[i].symbol));
-                    if options.debug {
+                    if debug {
                         eprintln!("init_static: async end {}", INIT[i].symbol);
                     }
                     output
@@ -180,12 +202,13 @@ pub async fn init_static() -> Result<()> {
 pub mod __private {
     use std::pin::Pin;
 
-    pub use {anyhow, linkme};
+    pub use anyhow;
+    pub use linkme;
 
     use crate::Symbol;
     pub use crate::init_static::MaybeInitStatic;
 
-    pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T>>>;
+    pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
     pub enum InitFn {
         Sync(fn() -> anyhow::Result<()>),

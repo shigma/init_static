@@ -24,7 +24,7 @@ fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
 }
 
 pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
-    let input_items = match parse_repeated::<syn::Item>(input) {
+    let input_stmts = match parse_repeated::<syn::Stmt>(input) {
         Ok(items) => items,
         Err(err) => return err.to_compile_error(),
     };
@@ -32,7 +32,15 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
     let mut output = TokenStream2::new();
     let mut inner = TokenStream2::new();
 
-    for item in input_items {
+    for stmt in input_stmts {
+        let syn::Stmt::Item(item) = stmt else {
+            output.extend(
+                syn::Error::new(stmt.span(), "only static item declarations are allowed in init_static!")
+                    .to_compile_error(),
+            );
+            continue;
+        };
+
         let syn::Item::Static(item_static) = item else {
             output.extend(quote! { #item });
             continue;
