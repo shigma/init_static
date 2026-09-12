@@ -1,15 +1,140 @@
+#![allow(rustdoc::broken_intra_doc_links)]
+
 use std::collections::{BTreeSet, HashSet};
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span as Span2, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
+/// Macro to declare statically stored values with explicit initialization. Similar to
+/// [`lazy_static!`](lazy_static::lazy_static!), but initialization is not automatic.
+///
+/// Each static declared using this macro:
+///
+/// - Wraps the value type in [`InitStatic`](struct@::init_static::InitStatic)
+/// - Generates an init function that sets the value
+/// - Registers the init function in a distributed slice
+///
+/// The values are initialized when [`init_static()`](::init_static::init_static()) is called.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// init_static! {
+///     static VALUE: u32 = "42".parse()?;
+/// }
+///
+/// #[tokio::main]
+/// async fn main() {
+///     init_static().await.unwrap();
+///     println!("{}", *VALUE);
+/// }
+/// ```
 #[proc_macro]
 pub fn init_static(input: TokenStream) -> TokenStream {
     init_static_inner(input.into()).into()
+}
+
+/// Emits the body of a stub attribute: these attributes are consumed by [`init_static!`], so
+/// reaching the proc macro itself means it was applied somewhere it has no meaning.
+fn stub(name: &str, item: TokenStream) -> TokenStream {
+    let message = format!("`#[{name}]` is only meaningful on a static inside `init_static!`");
+    let error = syn::Error::new(Span2::call_site(), message).to_compile_error();
+    let item = TokenStream2::from(item);
+    quote! { #error #item }.into()
+}
+
+/// Declares a reverse dependency: every listed static is initialized *after* the annotated one.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// init_static! {
+///     // SCHEMA is ready before CONNECTION, even though CONNECTION never mentions it.
+///     #[before(CONNECTION)]
+///     static SCHEMA: u32 = 1;
+///     static CONNECTION: u32 = 2;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// # Note
+///
+/// This attribute is inert: it is consumed by [`init_static!`] and has no effect anywhere else.
+/// Applying it outside an [`init_static!`] block is a compile error.
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn before(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    stub("before", item)
+}
+
+/// Declares a forward ordering edge: every listed static is initialized *before* the annotated
+/// one, exactly like a dependency inferred from the initializer expression.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// init_static! {
+///     static LOGGER: u32 = 1;
+///     // Nothing here reads LOGGER; the ordering is still guaranteed.
+///     #[after(LOGGER)]
+///     static SERVICE: u32 = 2;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// # Note
+///
+/// This attribute is inert: it is consumed by [`init_static!`] and has no effect anywhere else.
+/// Applying it outside an [`init_static!`] block is a compile error.
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn after(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    stub("after", item)
+}
+
+/// Assigns an initialization priority to a static (default `0`).
+///
+/// Statics are initialized in descending priority order: higher values run first, negative values
+/// run after the default tier. Each distinct value forms a tier, and a tier fully completes before
+/// the next one starts.
+///
+/// Real dependencies always take precedence over priority. A dependency inherits the highest
+/// priority among the nodes that depend on it, so it is never scheduled later than its dependents,
+/// no matter what priority it declares.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// init_static! {
+///     #[priority(10)]
+///     static EARLY: u32 = 1;
+///     static NORMAL: u32 = 2;
+///     #[priority(-5)]
+///     static LATE: u32 = 3;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// # Note
+///
+/// This attribute is inert: it is consumed by [`init_static!`] and has no effect anywhere else.
+/// Applying it outside an [`init_static!`] block is a compile error.
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn priority(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    stub("priority", item)
 }
 
 fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
@@ -23,22 +148,19 @@ fn parse_repeated<T: Parse>(tokens: TokenStream2) -> syn::Result<Vec<T>> {
     parser.parse2(tokens)
 }
 
-fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<(i32, syn::Ident)> {
+fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<(i32, Vec<syn::Ident>)> {
     let mut priority = 0;
-    // Field name used on the left of `priority: #priority`. When the user writes
-    // `#[priority = N]`, reuse that `priority` ident so the generated field inherits
-    // its span, letting editors highlight / link the attribute to the struct field.
-    let mut field = syn::Ident::new("priority", proc_macro2::Span::call_site());
+    let mut idents = vec![];
     for attr in attrs {
         if !attr.path().is_ident("priority") {
             continue;
         }
         if let Some(ident) = attr.path().get_ident() {
-            field = ident.clone();
+            idents.push(ident.clone());
         }
-        let value = &attr.meta.require_name_value()?.value;
+        let value = attr.parse_args::<syn::Expr>()?;
         let make_error = || syn::Error::new(value.span(), "expected an integer literal for `priority`");
-        priority = match value {
+        priority = match &value {
             syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Int(lit),
                 ..
@@ -60,7 +182,61 @@ fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<(i32, syn::Ident)> {
             _ => return Err(make_error()),
         };
     }
-    Ok((priority, field))
+    Ok((priority, idents))
+}
+
+/// Collects the paths listed by every `#[#name(PATH, ...)]` attribute. Used for both
+/// `#[before]` and `#[after]`, which differ only in the direction of the edge they produce.
+fn parse_edges(attrs: &[syn::Attribute], name: &str) -> syn::Result<(Vec<syn::Path>, Vec<syn::Ident>)> {
+    let mut paths = vec![];
+    let mut idents = vec![];
+    for attr in attrs {
+        if !attr.path().is_ident(name) {
+            continue;
+        }
+        if let Some(ident) = attr.path().get_ident() {
+            idents.push(ident.clone());
+        }
+        let parsed =
+            attr.parse_args_with(syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated)?;
+        if parsed.is_empty() {
+            let message = format!("expected at least one path for `{name}`");
+            return Err(syn::Error::new(attr.span(), message));
+        }
+        paths.extend(parsed);
+    }
+    Ok((paths, idents))
+}
+
+/// Emits an inert `use` of the stub attribute for each occurrence of an attribute the macro
+/// consumes.
+///
+/// The imported ident is the user-written one, so it carries that token's span: editors resolve
+/// `#[before(...)]` to `init_static::before` and show its documentation. Underscore imports bind
+/// nothing and may repeat, so one attribute can appear several times on the same static.
+fn build_stub_uses(idents: &[syn::Ident]) -> TokenStream2 {
+    let uses = idents.iter().map(|ident| {
+        quote! {
+            #[allow(unused_imports)]
+            use ::init_static::#ident as _;
+        }
+    });
+    quote! { #(#uses)* }
+}
+
+/// Builds the `&'static [&'static Symbol]` expression for an ordering attribute.
+///
+/// `InitStatic::symbol` takes `&Self`, so naming anything else is a type error at the offending
+/// path. Spanning each call at the path makes that error point inside the attribute rather than
+/// at the macro call site. It is also a `const fn`, which is what lets these edges be plain
+/// static data instead of a `fn` like `deps`.
+fn build_edges(paths: &[syn::Path]) -> TokenStream2 {
+    let exprs = paths.iter().map(|path| {
+        quote_spanned! { path.span() =>
+            ::init_static::InitStatic::symbol(&#path)
+        }
+    });
+    quote! { &[#(#exprs),*] }
 }
 
 pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
@@ -86,13 +262,26 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
-        let (priority, priority_field) = match parse_priority(&item_static.attrs) {
+        let (priority, priority_idents) = match parse_priority(&item_static.attrs) {
             Ok(result) => result,
             Err(err) => {
                 output.extend(err.to_compile_error());
                 continue;
             }
         };
+
+        let edges = ["before", "after"].map(|name| parse_edges(&item_static.attrs, name));
+        let [Ok((before_paths, before_idents)), Ok((after_paths, after_idents))] = edges else {
+            for err in edges.into_iter().filter_map(Result::err) {
+                output.extend(err.to_compile_error());
+            }
+            continue;
+        };
+
+        let stub_uses = [&priority_idents, &before_idents, &after_idents]
+            .map(|idents| build_stub_uses(idents))
+            .into_iter()
+            .collect::<TokenStream2>();
 
         let mut is_try = false;
         let mut is_async = false;
@@ -145,6 +334,9 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             )
         };
 
+        let before_expr = build_edges(&before_paths);
+        let after_expr = build_edges(&after_paths);
+
         let init_ident = syn::Ident::new(&format!("INIT_{item_ident}"), item_ident.span());
         let (init_variant, init_item) = if is_async {
             (
@@ -175,13 +367,16 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
             #[linkme(crate = ::init_static::__private::linkme)]
             static #init_ident: ::init_static::__private::Init = {
+                #stub_uses
                 #init_item
                 #deps_item
                 ::init_static::__private::Init {
                     symbol: ::init_static::InitStatic::symbol(&#item_ident),
                     init: ::init_static::__private::InitFn::#init_variant(#init_ident),
                     deps: #deps_ident,
-                    #priority_field: #priority,
+                    before: #before_expr,
+                    after: #after_expr,
+                    priority: #priority,
                 }
             };
         });

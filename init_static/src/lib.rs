@@ -13,33 +13,8 @@ use crate::__private::{BoxFuture, INIT, InitFn};
 mod error;
 mod init_static;
 
-/// Macro to declare statically stored values with explicit initialization. Similar to
-/// [`lazy_static!`](lazy_static::lazy_static!), but initialization is not automatic.
-///
-/// Each static declared using this macro:
-///
-/// - Wraps the value type in [`InitStatic`](struct@InitStatic)
-/// - Generates an init function that sets the value
-/// - Registers the init function in a distributed slice
-///
-/// The values are initialized when [`init_static()`] is called.
-///
-/// # Example
-///
-/// ```
-/// use init_static::init_static;
-///
-/// init_static! {
-///     static VALUE: u32 = "42".parse()?;
-/// }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     init_static().await.unwrap();
-///     println!("{}", *VALUE);
-/// }
-/// ```
 pub use init_static_macro::init_static;
+pub use init_static_macro::{after, before, priority};
 
 pub use crate::error::InitError;
 pub use crate::init_static::{InitStatic, Symbol};
@@ -134,7 +109,7 @@ async fn init_impl() -> anyhow::Result<()> {
         }
     }
 
-    let deps = INIT
+    let mut deps = INIT
         .iter()
         .map(|init| {
             (init.deps)()
@@ -143,6 +118,22 @@ async fn init_impl() -> anyhow::Result<()> {
                 .collect::<HashSet<_>>()
         })
         .collect::<Vec<_>>();
+
+    // `#[after(X)]` is an ordinary dependency edge; `#[before(X)]` is its mirror, so it is
+    // recorded on `X` instead. Duplicates of an inferred edge collapse into the same `HashSet`.
+    for (i, init) in INIT.iter().enumerate() {
+        for symbol in init.after {
+            if let Some(&k) = symbol_map.get(symbol) {
+                deps[i].insert(k);
+            }
+        }
+        for symbol in init.before {
+            if let Some(&k) = symbol_map.get(symbol) {
+                deps[k].insert(i);
+            }
+        }
+    }
+    let deps = deps;
 
     // Effective priority: a node inherits the highest priority among all nodes that
     // (transitively) depend on it, so a dependency's tier is never lower than its
@@ -261,12 +252,8 @@ pub mod __private {
         pub symbol: &'static Symbol,
         pub init: InitFn,
         pub deps: fn() -> Vec<Option<&'static Symbol>>,
-        /// Initialization priority declared via `#[priority = N]` (default `0`).
-        ///
-        /// Statics are initialized in descending priority order: higher values run first, negative
-        /// values run after the default tier. Real dependencies always take precedence — a
-        /// dependency inherits the highest priority among the nodes that depend on it, so it is
-        /// never scheduled later than its dependents.
+        pub before: &'static [&'static Symbol],
+        pub after: &'static [&'static Symbol],
         pub priority: i32,
     }
 

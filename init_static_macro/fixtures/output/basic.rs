@@ -35,6 +35,8 @@ const _: () = {
             symbol: ::init_static::InitStatic::symbol(&V1),
             init: ::init_static::__private::InitFn::Sync(INIT_V1),
             deps: DEPS_V1,
+            before: &[],
+            after: &[],
             priority: 0i32,
         }
     };
@@ -52,6 +54,8 @@ const _: () = {
             symbol: ::init_static::InitStatic::symbol(&V2),
             init: ::init_static::__private::InitFn::Sync(INIT_V2),
             deps: ::std::vec::Vec::new,
+            before: &[],
+            after: &[],
             priority: 0i32,
         }
     };
@@ -80,6 +84,8 @@ const _: () = {
             symbol: ::init_static::InitStatic::symbol(&V3),
             init: ::init_static::__private::InitFn::Async(INIT_V3),
             deps: DEPS_V3,
+            before: &[],
+            after: &[],
             priority: 0i32,
         }
     };
@@ -101,6 +107,8 @@ const _: () = {
             symbol: ::init_static::InitStatic::symbol(&V4),
             init: ::init_static::__private::InitFn::Async(INIT_V4),
             deps: ::std::vec::Vec::new,
+            before: &[],
+            after: &[],
             priority: 0i32,
         }
     };
@@ -141,6 +149,8 @@ const _: () = {
             symbol: ::init_static::InitStatic::symbol(&V5),
             init: ::init_static::__private::InitFn::Sync(INIT_V5),
             deps: DEPS_V5,
+            before: &[],
+            after: &[],
             priority: 0i32,
         }
     };
