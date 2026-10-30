@@ -106,7 +106,7 @@ macro_rules! InitStatic {
 }
 
 /// A wrapper around [`OnceLock`] providing safe initialization and [`Deref`] support to mimic the
-/// ergonomics of [`lazy_static!`](lazy_static::lazy_static!).
+/// ergonomics of [`lazy_static!`](https://docs.rs/lazy_static/latest/lazy_static/macro.lazy_static.html).
 ///
 /// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
 /// [`init_static()`](crate::init_static()). Accessing an uninitialized value will panic.

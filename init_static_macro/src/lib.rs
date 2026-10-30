@@ -10,7 +10,7 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 
 /// Macro to declare statically stored values with explicit initialization. Similar to
-/// [`lazy_static!`](lazy_static::lazy_static!), but initialization is not automatic.
+/// [`lazy_static!`](https://docs.rs/lazy_static/latest/lazy_static/macro.lazy_static.html), but initialization is not automatic.
 ///
 /// Each static declared using this macro:
 ///

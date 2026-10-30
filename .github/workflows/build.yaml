@@ -32,6 +32,10 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-features --all-targets --no-fail-fast
 
+      # `--all-targets` leaves out doctests.
+      - name: Run doctests
+        run: cargo test --workspace --doc
+
       # Without this, an environment where GC mode silently falls back (e.g. a non-lld linker)
       # would still pass every test. `tests/missing.rs` only has a test when GC mode is in effect.
       - name: Check GC mode is in effect
@@ -43,4 +47,9 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy lint
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check docs
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
