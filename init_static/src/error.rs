@@ -15,6 +15,7 @@ use crate::Symbol;
 /// To distinguish between error types, deref the [`Arc`](std::sync::Arc) and use
 /// [`anyhow::Error::downcast_ref`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum InitError {
     /// A static symbol was defined multiple times.
     ///
@@ -41,6 +42,17 @@ pub enum InitError {
     /// }
     /// ```
     Circular { symbols: Vec<&'static Symbol> },
+
+    /// A static is required by another static, but has no registration record.
+    ///
+    /// Only reported when the `init_static_gc` cfg is in effect. `required_by` is used, so the
+    /// linker should have kept `symbol` as well; its record going missing means the linker removed
+    /// a static that is actually used, or the build is inconsistent. No static is initialized when
+    /// this error is returned.
+    Missing {
+        symbol: &'static Symbol,
+        required_by: &'static Symbol,
+    },
 }
 
 impl std::fmt::Display for InitError {
@@ -55,6 +67,9 @@ impl std::fmt::Display for InitError {
                     writeln!(f, "    {symbol}")?;
                 }
                 Ok(())
+            }
+            Self::Missing { symbol, required_by } => {
+                write!(f, "Symbol {symbol} is required by {required_by} but is not registered.")
             }
         }
     }

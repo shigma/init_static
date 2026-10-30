@@ -6,12 +6,13 @@ on:
 
 jobs:
   check:
-    name: Build & Test
+    name: Build & Test (${{ matrix.toolchain }}, ${{ matrix.mode }})
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
         toolchain: [stable, beta, nightly]
+        mode: [default, gc]
       fail-fast: false
 
     steps:
@@ -23,6 +24,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy, rust-src
+          rustflags: ${{ matrix.mode == 'gc' && '-D warnings --cfg init_static_gc' || '-D warnings' }}
 
       - name: Cargo check
         run: cargo check --workspace --all-targets
@@ -30,8 +32,24 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-features --all-targets --no-fail-fast
 
+      # `--all-targets` leaves out doctests.
+      - name: Run doctests
+        run: cargo test --workspace --doc
+
+      # Without this, an environment where GC mode silently falls back (e.g. a non-lld linker)
+      # would still pass every test. `tests/missing.rs` only has a test when GC mode is in effect.
+      - name: Check GC mode is in effect
+        if: matrix.mode == 'gc'
+        run: cargo test -p init_static --test missing | grep -q "running 1 test"
+
       - name: Check formatting
+        if: matrix.mode == 'default'
         run: cargo fmt --all -- --check
 
       - name: Clippy lint
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check docs
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings

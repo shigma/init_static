@@ -13,18 +13,23 @@ mod nested {
     use init_static::init_static;
 
     init_static! {
+        #[keep]
         pub static TAIL: u32 = super::record("TAIL");
     }
 }
 
 init_static! {
     // Reverse dependency: HEAD is initialized before MIDDLE, even though MIDDLE
-    // never mentions HEAD in its expression.
+    // never mentions HEAD in its expression. `#[before]` keeps neither side alive,
+    // hence the `#[keep]`s.
+    #[keep]
     #[before(MIDDLE)]
     static HEAD: u32 = record("HEAD");
+    #[keep]
     static MIDDLE: u32 = record("MIDDLE");
     // Multiple targets in one attribute, including a path into another module and
     // an async initializer.
+    #[keep]
     #[before(HEAD, nested::TAIL)]
     static ROOT: u32 = async { record("ROOT") }.await;
 }

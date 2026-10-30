@@ -1,6 +1,6 @@
 [package]
 name = "init_static"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 license = "MIT"
 authors = [
@@ -15,7 +15,10 @@ documentation = "https://docs.rs/init_static"
 [dependencies]
 anyhow = "1.0"
 futures-util = "0.3.31"
-init_static_macro = { version = "0.7.0", path = "../init_static_macro" }
+init_static_macro = { version = "0.8.0", path = "../init_static_macro" }
+
+# Only the default mode collects records with linkme. Keep this condition in sync with `build.rs`.
+[target.'cfg(not(all(init_static_gc, any(target_os = "linux", target_os = "android"), any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 linkme = "0.3.35"
 
 [dev-dependencies]

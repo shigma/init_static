@@ -106,12 +106,14 @@ macro_rules! InitStatic {
 }
 
 /// A wrapper around [`OnceLock`] providing safe initialization and [`Deref`] support to mimic the
-/// ergonomics of [`lazy_static!`](lazy_static::lazy_static!).
+/// ergonomics of [`lazy_static!`](https://docs.rs/lazy_static/latest/lazy_static/macro.lazy_static.html).
 ///
 /// Values must be initialized exactly once, either via [`InitStatic::init`] or by calling
 /// [`init_static()`](crate::init_static()). Accessing an uninitialized value will panic.
 pub struct InitStatic<T> {
     symbol: &'static Symbol,
+    #[cfg(init_static_gc_enabled)]
+    anchor: Option<fn()>,
     inner: OnceLock<T>,
 }
 
@@ -124,6 +126,19 @@ impl<T> InitStatic<T> {
     pub const fn new(symbol: &'static Symbol) -> Self {
         Self {
             symbol,
+            #[cfg(init_static_gc_enabled)]
+            anchor: None,
+            inner: OnceLock::new(),
+        }
+    }
+
+    #[cfg(init_static_gc_enabled)]
+    #[doc(hidden)]
+    #[inline]
+    pub const fn __with_anchor(symbol: &'static Symbol, anchor: fn()) -> Self {
+        Self {
+            symbol,
+            anchor: Some(anchor),
             inner: OnceLock::new(),
         }
     }
@@ -182,6 +197,16 @@ impl<T: Display> Display for InitStatic<T> {
     }
 }
 
+/// A dependency of a static, as reported by its generated `DEPS_*` function.
+#[doc(hidden)]
+pub struct Dep {
+    pub symbol: &'static Symbol,
+    /// Whether the dependency has an anchor, i.e. it was declared by
+    /// [`init_static!`](crate::init_static!) without `#[keep]` in GC mode. Statics have no anchor
+    /// in the default mode, nor when created by hand with [`InitStatic::new`].
+    pub anchored: bool,
+}
+
 /// A helper trait for extracting [`Symbol`] information from static variables.
 ///
 /// This trait uses [autoref-based specialization](https://github.com/dtolnay/case-studies/blob/master/autoref-specialization/README.md)
@@ -192,27 +217,33 @@ impl<T: Display> Display for InitStatic<T> {
 ///
 /// The trait has two implementations:
 ///
-/// - For [`InitStatic<T>`]: Returns `Some(&Symbol)` containing the source location metadata.
+/// - For [`InitStatic<T>`]: Returns `Some(Dep)` containing the source location metadata.
 /// - For `&T` (any reference): Returns `None`, indicating this is not a tracked static.
 ///
 /// When the macro generates dependency-checking code, Rust's method resolution prefers
 /// the more specific [`InitStatic<T>`] implementation over the blanket `&T` implementation,
 /// allowing automatic detection of [`init_static!`](crate::init_static!) variables.
 pub trait MaybeInitStatic {
-    /// Returns the [`Symbol`] for this static if it is an [`InitStatic`], or `None` otherwise.
-    fn __get_symbol(&self) -> Option<&'static Symbol>;
+    /// Returns the [`Dep`] for this static if it is an [`InitStatic`], or `None` otherwise.
+    fn __get_dep(&self) -> Option<Dep>;
 }
 
 impl<T> MaybeInitStatic for InitStatic<T> {
     #[inline]
-    fn __get_symbol(&self) -> Option<&'static Symbol> {
-        Some(self.symbol)
+    fn __get_dep(&self) -> Option<Dep> {
+        Some(Dep {
+            symbol: self.symbol,
+            #[cfg(init_static_gc_enabled)]
+            anchored: self.anchor.is_some(),
+            #[cfg(not(init_static_gc_enabled))]
+            anchored: false,
+        })
     }
 }
 
 impl<T> MaybeInitStatic for &T {
     #[inline]
-    fn __get_symbol(&self) -> Option<&'static Symbol> {
+    fn __get_dep(&self) -> Option<Dep> {
         None
     }
 }
