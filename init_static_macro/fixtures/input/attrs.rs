@@ -26,4 +26,8 @@ init_static! {
     #[before(A2)]
     static A1: u32 = *B1 + 1;
     static A2: u32 = 2;
+
+    #[keep]
+    #[before(A2)]
+    static K0: u32 = 0;
 }

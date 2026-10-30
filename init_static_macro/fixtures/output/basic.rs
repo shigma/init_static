@@ -1,24 +1,14 @@
 #[allow(unused_imports)]
 use init_static_macro::init_static;
 #[rustfmt::skip]
-#[allow(clippy::type_complexity)]
-static V1: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V1);
-#[rustfmt::skip]
-#[allow(clippy::type_complexity)]
-static V2: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V2);
-#[rustfmt::skip]
-#[allow(clippy::type_complexity)]
-static V3: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V3);
-#[rustfmt::skip]
-#[allow(clippy::type_complexity)]
-static V4: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V4);
-#[rustfmt::skip]
-const _: () = {
-    #[::init_static::__private::linkme::distributed_slice(
-        ::init_static::__private::INIT
-    )]
-    #[linkme(crate = ::init_static::__private::linkme)]
-    static INIT_V1: ::init_static::__private::Init = {
+::init_static::__private::declare! {
+    keep: false,
+    static: {
+        #[allow(clippy::type_complexity)]
+        static V1: ::init_static::InitStatic<u32>
+    },
+    symbol: ::init_static::Symbol!(V1),
+    entry: INIT_V1 = {
         #[allow(non_snake_case)]
         fn INIT_V1() -> ::init_static::__private::anyhow::Result<()> {
             ::init_static::InitStatic::init(&V1, N1);
@@ -26,10 +16,10 @@ const _: () = {
         }
         #[allow(non_snake_case, clippy::needless_borrow)]
         fn DEPS_V1() -> ::std::vec::Vec<
-            ::std::option::Option<&'static ::init_static::Symbol>,
+            ::std::option::Option<::init_static::__private::Dep>,
         > {
             use ::init_static::__private::MaybeInitStatic;
-            ::std::vec![(& N1).__get_symbol()]
+            ::std::vec![(& N1).__get_dep()]
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V1),
@@ -37,14 +27,19 @@ const _: () = {
             deps: DEPS_V1,
             before: &[],
             after: &[],
-            priority: 0i32,
+            priority: 0,
         }
-    };
-    #[::init_static::__private::linkme::distributed_slice(
-        ::init_static::__private::INIT
-    )]
-    #[linkme(crate = ::init_static::__private::linkme)]
-    static INIT_V2: ::init_static::__private::Init = {
+    },
+}
+#[rustfmt::skip]
+::init_static::__private::declare! {
+    keep: false,
+    static: {
+        #[allow(clippy::type_complexity)]
+        static V2: ::init_static::InitStatic<u32>
+    },
+    symbol: ::init_static::Symbol!(V2),
+    entry: INIT_V2 = {
         #[allow(non_snake_case)]
         fn INIT_V2() -> ::init_static::__private::anyhow::Result<()> {
             ::init_static::InitStatic::init(&V2, "42".parse()?);
@@ -56,14 +51,19 @@ const _: () = {
             deps: ::std::vec::Vec::new,
             before: &[],
             after: &[],
-            priority: 0i32,
+            priority: 0,
         }
-    };
-    #[::init_static::__private::linkme::distributed_slice(
-        ::init_static::__private::INIT
-    )]
-    #[linkme(crate = ::init_static::__private::linkme)]
-    static INIT_V3: ::init_static::__private::Init = {
+    },
+}
+#[rustfmt::skip]
+::init_static::__private::declare! {
+    keep: false,
+    static: {
+        #[allow(clippy::type_complexity)]
+        static V3: ::init_static::InitStatic<u32>
+    },
+    symbol: ::init_static::Symbol!(V3),
+    entry: INIT_V3 = {
         #[allow(non_snake_case)]
         fn INIT_V3() -> ::init_static::__private::BoxFuture<
             ::init_static::__private::anyhow::Result<()>,
@@ -75,10 +75,10 @@ const _: () = {
         }
         #[allow(non_snake_case, clippy::needless_borrow)]
         fn DEPS_V3() -> ::std::vec::Vec<
-            ::std::option::Option<&'static ::init_static::Symbol>,
+            ::std::option::Option<::init_static::__private::Dep>,
         > {
             use ::init_static::__private::MaybeInitStatic;
-            ::std::vec![(& N1).__get_symbol()]
+            ::std::vec![(& N1).__get_dep()]
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V3),
@@ -86,14 +86,19 @@ const _: () = {
             deps: DEPS_V3,
             before: &[],
             after: &[],
-            priority: 0i32,
+            priority: 0,
         }
-    };
-    #[::init_static::__private::linkme::distributed_slice(
-        ::init_static::__private::INIT
-    )]
-    #[linkme(crate = ::init_static::__private::linkme)]
-    static INIT_V4: ::init_static::__private::Init = {
+    },
+}
+#[rustfmt::skip]
+::init_static::__private::declare! {
+    keep: false,
+    static: {
+        #[allow(clippy::type_complexity)]
+        static V4: ::init_static::InitStatic<u32>
+    },
+    symbol: ::init_static::Symbol!(V4),
+    entry: INIT_V4 = {
         #[allow(non_snake_case)]
         fn INIT_V4() -> ::init_static::__private::BoxFuture<
             ::init_static::__private::anyhow::Result<()>,
@@ -109,22 +114,21 @@ const _: () = {
             deps: ::std::vec::Vec::new,
             before: &[],
             after: &[],
-            priority: 0i32,
+            priority: 0,
         }
-    };
-};
+    },
+}
 #[rustfmt::skip]
 const N1: u32 = 42;
 #[rustfmt::skip]
-#[allow(clippy::type_complexity)]
-static V5: ::init_static::InitStatic<u32> = ::init_static::InitStatic!(V5);
-#[rustfmt::skip]
-const _: () = {
-    #[::init_static::__private::linkme::distributed_slice(
-        ::init_static::__private::INIT
-    )]
-    #[linkme(crate = ::init_static::__private::linkme)]
-    static INIT_V5: ::init_static::__private::Init = {
+::init_static::__private::declare! {
+    keep: false,
+    static: {
+        #[allow(clippy::type_complexity)]
+        static V5: ::init_static::InitStatic<u32>
+    },
+    symbol: ::init_static::Symbol!(V5),
+    entry: INIT_V5 = {
         #[allow(non_snake_case)]
         fn INIT_V5() -> ::init_static::__private::anyhow::Result<()> {
             ::init_static::InitStatic::init(
@@ -140,10 +144,10 @@ const _: () = {
         }
         #[allow(non_snake_case, clippy::needless_borrow)]
         fn DEPS_V5() -> ::std::vec::Vec<
-            ::std::option::Option<&'static ::init_static::Symbol>,
+            ::std::option::Option<::init_static::__private::Dep>,
         > {
             use ::init_static::__private::MaybeInitStatic;
-            ::std::vec![(& N1).__get_symbol(), (& V1).__get_symbol()]
+            ::std::vec![(& N1).__get_dep(), (& V1).__get_dep()]
         }
         ::init_static::__private::Init {
             symbol: ::init_static::InitStatic::symbol(&V5),
@@ -151,7 +155,7 @@ const _: () = {
             deps: DEPS_V5,
             before: &[],
             after: &[],
-            priority: 0i32,
+            priority: 0,
         }
-    };
-};
+    },
+}

@@ -16,9 +16,13 @@ use syn::visit::Visit;
 ///
 /// - Wraps the value type in [`InitStatic`](struct@::init_static::InitStatic)
 /// - Generates an init function that sets the value
-/// - Registers the init function in a distributed slice
+/// - Registers the init function, to be found by [`init_static()`](::init_static::init_static())
 ///
 /// The values are initialized when [`init_static()`](::init_static::init_static()) is called.
+///
+/// With the `init_static_gc` cfg (on Linux or Android, x86_64 or aarch64, linked by lld), only the
+/// statics the final binary uses are initialized, and the others are removed by the linker. Statics
+/// whose initializer only matters for its side effects should then be annotated with [`keep`].
 ///
 /// # Example
 ///
@@ -49,7 +53,15 @@ fn stub(name: &str, item: TokenStream) -> TokenStream {
     quote! { #error #item }.into()
 }
 
-/// Declares a reverse dependency: every listed static is initialized *after* the annotated one.
+/// Declares a reverse ordering edge: every listed static is initialized *after* the annotated one.
+///
+/// # Semantics
+///
+/// The attribute only constrains the order. When both the annotated static and a listed static are
+/// initialized, the ordering is guaranteed; when either of them is not, the constraint is ignored.
+/// In particular, neither the attribute nor its targets make any static count as used under the
+/// `init_static_gc` cfg (see [`keep`]). To make a static actually depend on another one, read the
+/// other static in its initializer instead.
 ///
 /// # Example
 ///
@@ -76,7 +88,15 @@ pub fn before(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Declares a forward ordering edge: every listed static is initialized *before* the annotated
-/// one, exactly like a dependency inferred from the initializer expression.
+/// one.
+///
+/// # Semantics
+///
+/// The attribute only constrains the order. When both the annotated static and a listed static are
+/// initialized, the ordering is guaranteed; when either of them is not, the constraint is ignored.
+/// In particular, neither the attribute nor its targets make any static count as used under the
+/// `init_static_gc` cfg (see [`keep`]). To make a static actually depend on another one, read the
+/// other static in its initializer instead.
 ///
 /// # Example
 ///
@@ -100,6 +120,38 @@ pub fn before(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn after(_attr: TokenStream, item: TokenStream) -> TokenStream {
     stub("after", item)
+}
+
+/// Always initializes the annotated static, even if nothing in the program reads it.
+///
+/// This only matters when the `init_static_gc` cfg is in effect, i.e. set and supported by the
+/// target (Linux or Android on x86_64 or aarch64, linked by lld): statics that the final binary
+/// never uses are then neither initialized nor linked in. Annotate statics whose initializer is run
+/// purely for its side effects (e.g. registering a plugin) so that they are kept regardless.
+/// Without the cfg, every static is initialized anyway and this attribute has no effect.
+///
+/// # Example
+///
+/// ```
+/// use init_static::init_static;
+///
+/// fn register_plugin() {}
+///
+/// init_static! {
+///     #[keep]
+///     static REGISTER: () = register_plugin();
+/// }
+/// # fn main() {}
+/// ```
+///
+/// # Note
+///
+/// This attribute is inert: it is consumed by [`init_static!`] and has no effect anywhere else.
+/// Applying it outside an [`init_static!`] block is a compile error.
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn keep(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    stub("keep", item)
 }
 
 /// Assigns an initialization priority to a static (default `0`).
@@ -185,6 +237,20 @@ fn parse_priority(attrs: &[syn::Attribute]) -> syn::Result<(i32, Vec<syn::Ident>
     Ok((priority, idents))
 }
 
+fn parse_keep(attrs: &[syn::Attribute]) -> syn::Result<(bool, Vec<syn::Ident>)> {
+    let mut idents = vec![];
+    for attr in attrs {
+        if !attr.path().is_ident("keep") {
+            continue;
+        }
+        attr.meta.require_path_only()?;
+        if let Some(ident) = attr.path().get_ident() {
+            idents.push(ident.clone());
+        }
+    }
+    Ok((!idents.is_empty(), idents))
+}
+
 /// Collects the paths listed by every `#[#name(PATH, ...)]` attribute. Used for both
 /// `#[before]` and `#[after]`, which differ only in the direction of the edge they produce.
 fn parse_edges(attrs: &[syn::Attribute], name: &str) -> syn::Result<(Vec<syn::Path>, Vec<syn::Ident>)> {
@@ -229,7 +295,9 @@ fn build_stub_uses(idents: &[syn::Ident]) -> TokenStream2 {
 /// `InitStatic::symbol` takes `&Self`, so naming anything else is a type error at the offending
 /// path. Spanning each call at the path makes that error point inside the attribute rather than
 /// at the macro call site. It is also a `const fn`, which is what lets these edges be plain
-/// static data instead of a `fn` like `deps`.
+/// static data instead of a `fn` like `deps`. Being evaluated at compile time, they hold no
+/// reference to the target static itself, so in GC mode an ordering attribute never keeps its
+/// target alive.
 fn build_edges(paths: &[syn::Path]) -> TokenStream2 {
     let exprs = paths.iter().map(|path| {
         quote_spanned! { path.span() =>
@@ -246,7 +314,6 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
     };
 
     let mut output = TokenStream2::new();
-    let mut inner = TokenStream2::new();
 
     for stmt in input_stmts {
         let syn::Stmt::Item(item) = stmt else {
@@ -278,7 +345,15 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             continue;
         };
 
-        let stub_uses = [&priority_idents, &before_idents, &after_idents]
+        let (keep, keep_idents) = match parse_keep(&item_static.attrs) {
+            Ok(result) => result,
+            Err(err) => {
+                output.extend(err.to_compile_error());
+                continue;
+            }
+        };
+
+        let stub_uses = [&priority_idents, &before_idents, &after_idents, &keep_idents]
             .map(|idents| build_stub_uses(idents))
             .into_iter()
             .collect::<TokenStream2>();
@@ -304,13 +379,9 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
         let static_ty = quote_spanned! { ty_span =>
             ::init_static::InitStatic<#item_ty>
         };
-        let static_expr = quote_spanned! { ident_span =>
-            ::init_static::InitStatic!(#item_ident)
+        let symbol_expr = quote_spanned! { ident_span =>
+            ::init_static::Symbol!(#item_ident)
         };
-        output.extend(quote! {
-            #[allow(clippy::type_complexity)]
-            #item_vis static #item_mut #item_ident: #static_ty = #static_expr;
-        });
 
         let (deps_ident, deps_item) = if free_paths.is_empty() {
             (quote! { ::std::vec::Vec::new }, quote! {})
@@ -319,19 +390,29 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
             let deps_stmts = free_paths.iter().map(|path| {
                 let path = &path.path;
                 quote! {
-                    (&#path).__get_symbol()
+                    (&#path).__get_dep()
                 }
             });
             (
                 quote! { #deps_ident },
                 quote! {
                     #[allow(non_snake_case, clippy::needless_borrow)]
-                    fn #deps_ident() -> ::std::vec::Vec<::std::option::Option<&'static ::init_static::Symbol>> {
+                    fn #deps_ident() -> ::std::vec::Vec<::std::option::Option<::init_static::__private::Dep>> {
                         use ::init_static::__private::MaybeInitStatic;
                         ::std::vec![#(#deps_stmts),*]
                     }
                 },
             )
+        };
+
+        // `quote!` turns a negative `i32` into a single negative literal token, which rustc accepts
+        // but rust-analyzer fails to match against `$init:expr` in `declare!`. Emit the sign as its
+        // own token, as in source code.
+        let priority_abs = proc_macro2::Literal::u32_unsuffixed(priority.unsigned_abs());
+        let priority_expr = if priority < 0 {
+            quote! { -#priority_abs }
+        } else {
+            quote! { #priority_abs }
         };
 
         let before_expr = build_edges(&before_paths);
@@ -363,32 +444,32 @@ pub(crate) fn init_static_inner(input: TokenStream2) -> TokenStream2 {
                 },
             )
         };
-        inner.extend(quote! {
-            #[::init_static::__private::linkme::distributed_slice(::init_static::__private::INIT)]
-            #[linkme(crate = ::init_static::__private::linkme)]
-            static #init_ident: ::init_static::__private::Init = {
-                #stub_uses
-                #init_item
-                #deps_item
-                ::init_static::__private::Init {
-                    symbol: ::init_static::InitStatic::symbol(&#item_ident),
-                    init: ::init_static::__private::InitFn::#init_variant(#init_ident),
-                    deps: #deps_ident,
-                    before: #before_expr,
-                    after: #after_expr,
-                    priority: #priority,
-                }
-            };
+        output.extend(quote! {
+            ::init_static::__private::declare! {
+                keep: #keep,
+                static: {
+                    #[allow(clippy::type_complexity)]
+                    #item_vis static #item_mut #item_ident: #static_ty
+                },
+                symbol: #symbol_expr,
+                entry: #init_ident = {
+                    #stub_uses
+                    #init_item
+                    #deps_item
+                    ::init_static::__private::Init {
+                        symbol: ::init_static::InitStatic::symbol(&#item_ident),
+                        init: ::init_static::__private::InitFn::#init_variant(#init_ident),
+                        deps: #deps_ident,
+                        before: #before_expr,
+                        after: #after_expr,
+                        priority: #priority_expr,
+                    }
+                },
+            }
         });
     }
 
-    quote! {
-        #output
-
-        const _: () = {
-            #inner
-        };
-    }
+    output
 }
 
 struct Path<'ast> {
@@ -534,6 +615,7 @@ mod test {
     use macro_expand::Context;
     use pretty_assertions::StrComparison;
     use prettyplease::unparse;
+    use syn::ext::IdentExt;
     use walkdir::WalkDir;
 
     use super::*;
@@ -542,6 +624,97 @@ mod test {
         path: PathBuf,
         expect: String,
         actual: String,
+    }
+
+    /// Like [`unparse`], but also formats the body of every `declare!` invocation, which
+    /// prettyplease leaves as a single run of tokens. The tokens themselves are unchanged.
+    ///
+    /// Only top-level invocations are formatted, which covers every fixture: `init_static!` blocks
+    /// nested in other items are left to prettyplease.
+    fn unparse_fixture(file: syn::File) -> String {
+        let syn::File { shebang, attrs, items } = file;
+        let mut output = unparse(&syn::File {
+            shebang,
+            attrs,
+            items: vec![],
+        });
+        for item in items {
+            output += &match item {
+                syn::Item::Macro(item_macro)
+                    if item_macro
+                        .mac
+                        .path
+                        .segments
+                        .last()
+                        .is_some_and(|s| s.ident == "declare") =>
+                {
+                    unparse_declare(&item_macro)
+                }
+                item => unparse(&syn::File {
+                    shebang: None,
+                    attrs: vec![],
+                    items: vec![item],
+                }),
+            };
+        }
+        output
+    }
+
+    fn unparse_declare(item_macro: &syn::ItemMacro) -> String {
+        let parser = |input: ParseStream| {
+            let mut fields = vec![];
+            while !input.is_empty() {
+                let name = input.call(syn::Ident::parse_any)?;
+                input.parse::<syn::Token![:]>()?;
+                let value = match name.to_string().as_str() {
+                    "keep" => input.parse::<syn::LitBool>()?.value.to_string(),
+                    "static" => {
+                        let content;
+                        syn::braced!(content in input);
+                        let decl = content.parse::<TokenStream2>()?;
+                        let item = unparse_item(quote! { #decl = (); });
+                        let item = item.trim_end().strip_suffix(" = ();").unwrap();
+                        format!("{{\n{}\n}}", indent(item))
+                    }
+                    "symbol" => unparse_expr(&input.parse()?),
+                    "entry" => {
+                        let entry = input.parse::<syn::Ident>()?;
+                        input.parse::<syn::Token![=]>()?;
+                        format!("{entry} = {}", unparse_expr(&input.parse()?))
+                    }
+                    _ => return Err(syn::Error::new(name.span(), "unknown `declare!` field")),
+                };
+                fields.push(format!("{name}: {value},"));
+                if !input.is_empty() {
+                    input.parse::<syn::Token![,]>()?;
+                }
+            }
+            Ok(fields)
+        };
+        let fields = parser.parse2(item_macro.mac.tokens.clone()).unwrap();
+        let attrs = &item_macro.attrs;
+        let path = &item_macro.mac.path;
+        let head = unparse_item(quote! { #(#attrs)* #path! {} });
+        let head = head.trim_end().strip_suffix("{}").unwrap();
+        format!("{head}{{\n{}\n}}\n", indent(&fields.join("\n")))
+    }
+
+    fn unparse_item(tokens: TokenStream2) -> String {
+        unparse(&syn::parse2(tokens).unwrap())
+    }
+
+    fn unparse_expr(expr: &syn::Expr) -> String {
+        let item = unparse_item(quote! { const _: () = #expr; });
+        let item = item.trim_end().strip_prefix("const _: () = ").unwrap();
+        item.strip_suffix(';').unwrap().to_owned()
+    }
+
+    fn indent(text: &str) -> String {
+        let lines = text.lines().map(|line| match line {
+            "" => String::new(),
+            line => format!("    {line}"),
+        });
+        lines.collect::<Vec<_>>().join("\n")
     }
 
     #[test]
@@ -560,7 +733,7 @@ mod test {
             let input = read_to_string(input_path).unwrap().parse().unwrap();
             let mut ctx = Context::new();
             ctx.register_proc_macro("init_static".into(), init_static_inner);
-            let actual = unparse(&syn::parse2(ctx.transform(input)).unwrap());
+            let actual = unparse_fixture(syn::parse2(ctx.transform(input)).unwrap());
             let expect_result = read_to_string(&output_path);
             if let Ok(expect) = &expect_result
                 && expect == &actual
