@@ -20,9 +20,10 @@ use syn::visit::Visit;
 ///
 /// The values are initialized when [`init_static()`](::init_static::init_static()) is called.
 ///
-/// With the `init_static_gc` cfg (supported on x86_64 and aarch64 Linux with glibc), only the
-/// statics the final binary uses are initialized, and the others are removed by the linker. Statics
-/// whose initializer only matters for its side effects should then be annotated with [`keep`].
+/// With the `init_static_gc` cfg (supported on x86_64 and aarch64 Linux with glibc, and requiring
+/// lld), only the statics the final binary uses are initialized, and the others are removed by the
+/// linker. Statics whose initializer only matters for its side effects should then be annotated
+/// with [`keep`].
 ///
 /// # Example
 ///

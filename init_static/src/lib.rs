@@ -18,9 +18,10 @@ pub use init_static_macro::{after, before, init_static, keep, priority};
 pub use crate::error::InitError;
 pub use crate::init_static::{InitStatic, Symbol};
 
-// GC mode relies on ELF sections with `SHF_LINK_ORDER`, and on lld to drop the unused ones. Only
-// these targets link with lld by default. Opting in elsewhere is an error rather than a silent
-// fallback to the default mode.
+// GC mode relies on ELF sections with `SHF_LINK_ORDER` and on the assembly emitted by `declare!`,
+// which have only been verified on these targets. Opting in elsewhere is an error rather than a
+// silent fallback to the default mode. Whether the binary is then linked by lld, as pruning also
+// requires, depends on the toolchain and cannot be checked here.
 #[cfg(all(
     init_static_gc,
     not(all(

@@ -48,18 +48,18 @@ async fn main() {
 
 ## Link-time GC
 
-By default, every static declared with `init_static!` anywhere in the final program is initialized, whether or not the program uses it. In GC mode, `init_static()` only initializes the statics the program actually uses (reads or takes the address of, from code reachable from `main`, or from the exported functions of a dynamic library), and the linker removes all the others, together with their initialization code.
+By default, every static declared with `init_static!` anywhere in the final program is initialized, whether or not the program uses it. In GC mode, `init_static()` only initializes the statics the program actually uses (reads or takes the address of, from code reachable from `main`, or from the exported functions of a `cdylib`), and the linker removes all the others, together with their initialization code.
 
 To enable it, add the following to the `.cargo/config.toml` of the project building the final binary:
 
 ```toml
-[target.'cfg(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")))']
+[target.'cfg(all(target_os = "linux", target_env = "gnu", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64")))']
 rustflags = ["--cfg", "init_static_gc"]
 ```
 
-GC mode is supported on x86_64 and aarch64 Linux with glibc (`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`), where Rust links with lld by default. Setting the cfg for any other target is a compile error, which is why the example scopes it to supported targets. Note that target-specific `rustflags` replace `[build] rustflags` instead of adding to them: if you already have the latter, repeat its flags in this section.
+GC mode is supported for the `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` targets. Setting the cfg for any other target is a compile error, which is why the example scopes it to supported targets. Note that target-specific `rustflags` replace `[build] rustflags` instead of adding to them: if you already have the latter, repeat its flags in this section.
 
-Pruning relies on lld: if you replace it with another linker, every static is kept. `-C link-dead-code` disables the pruning as well.
+Pruning also requires the final binary to be linked by lld with `--gc-sections`. Whether rustc uses lld by default depends on the toolchain, not only on the target: only the official toolchain for x86_64 Linux hosts (`<channel>-x86_64-unknown-linux-gnu`, as installed by rustup) links both targets above with its bundled `rust-lld`, while the official toolchains for other hosts, such as aarch64 Linux or macOS, link them through `cc` with the system's default linker. With such a toolchain, install lld and add `-C link-arg=-fuse-ld=lld` to the same `rustflags`. Every static will be kept if the binary is linked by another linker, or without `--gc-sections`.
 
 Statics that are initialized only for their side effects, and never read, should be annotated with `#[keep]`. `#[keep]` has no effect outside GC mode, so libraries can use it regardless of how they are built:
 
