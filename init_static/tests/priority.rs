@@ -11,15 +11,19 @@ fn record(name: &'static str) -> u32 {
 
 init_static! {
     // Highest priority; depends on DEP, which has default priority 0.
+    #[keep]
     #[priority(10)]
     static HIGH: u32 = async { *DEP + record("HIGH") }.await;
     // Default priority, but pulled into the top tier via effective-priority
     // propagation because HIGH depends on it.
     static DEP: u32 = record("DEP");
+    #[keep]
     #[priority(5)]
     static MID: u32 = record("MID");
+    #[keep]
     static LOW: u32 = record("LOW");
     // Negative priority runs after all default (0) nodes.
+    #[keep]
     #[priority(-5)]
     static LATE: u32 = record("LATE");
 }
