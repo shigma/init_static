@@ -13,11 +13,15 @@ mod nested {
     use init_static::init_static;
 
     init_static! {
+        #[keep]
         pub static SUBSYSTEM: u32 = super::record("SUBSYSTEM");
     }
 }
 
+// `#[after]` only constrains the order and keeps nothing alive, so every static except SERVICE
+// (read by CLIENT) is kept explicitly.
 init_static! {
+    #[keep]
     static LOGGER: u32 = record("LOGGER");
 
     // A pure ordering constraint: the expression never mentions LOGGER, so there is no
@@ -27,13 +31,16 @@ init_static! {
 
     // Cross-module target, and a target that is *also* an inferred dependency: the
     // duplicate edge must collapse rather than look like a cycle.
+    #[keep]
     #[after(nested::SUBSYSTEM, SERVICE)]
     static CLIENT: u32 = *SERVICE + record("CLIENT");
 
     // Both directions on one static.
+    #[keep]
     #[after(CLIENT)]
     #[before(TAIL)]
     static MIDDLE: u32 = record("MIDDLE");
+    #[keep]
     static TAIL: u32 = record("TAIL");
 }
 
