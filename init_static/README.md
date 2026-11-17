@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-init_static = { version = "0.8" }
+init_static = { version = "0.9" }
 ```
 
 # Example
